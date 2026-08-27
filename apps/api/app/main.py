@@ -1,10 +1,14 @@
 from fastapi import FastAPI
 
+from app.routes import fleet_router
+
 app = FastAPI(
     title="AI Logistics API",
     version="0.1.0",
     description="Fleet cost intelligence and logistics operations API.",
 )
+
+app.include_router(fleet_router)
 
 
 @app.get("/health")
