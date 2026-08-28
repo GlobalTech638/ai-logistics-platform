@@ -1,0 +1,27 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #f4f6f8; color: #17212b; }
+.shell { max-width: 1180px; margin: 0 auto; padding: 40px 24px 64px; }
+header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; margin-bottom: 32px; }
+.eyebrow { margin: 0 0 8px; font-size: 11px; font-weight: 800; letter-spacing: .12em; color: #68737d; }
+h1 { margin: 0; font-size: clamp(30px, 5vw, 52px); letter-spacing: -.04em; }
+h2 { margin: 0; font-size: 20px; }
+.subtitle { margin: 10px 0 0; color: #65717c; }
+.status { padding: 10px 14px; border: 1px solid #dbe1e6; border-radius: 999px; background: #fff; font-size: 13px; white-space: nowrap; }
+.status span { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #20a36a; margin-right: 8px; }
+.metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 16px; }
+.metric, .panel { background: #fff; border: 1px solid #e0e5e9; border-radius: 18px; box-shadow: 0 8px 24px rgba(23,33,43,.05); }
+.metric { padding: 22px; }
+.metric-value { margin-top: 7px; font-size: 30px; font-weight: 800; }
+.grid { display: grid; grid-template-columns: 1.7fr 1fr; gap: 16px; }
+.panel { padding: 24px; }
+.panel-head { margin-bottom: 18px; }
+.vehicle { display: grid; grid-template-columns: 1fr auto auto; gap: 16px; align-items: center; padding: 16px 0; border-top: 1px solid #edf0f2; }
+.vehicle:first-child { border-top: 0; }
+.vehicle-id { font-weight: 750; }
+.risk { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.cost { font-weight: 800; text-align: right; }
+.insight { min-height: 260px; }
+.insight h2 { margin: 12px 0; }
+.insight p { color: #5e6a74; line-height: 1.65; }
+.callout { margin-top: 20px; padding: 14px; border-radius: 12px; background: #f1f4f6; font-weight: 700; }
+@media (max-width: 800px) { header, .grid { display: block; } .status { display: inline-block; margin-top: 18px; } .metrics { grid-template-columns: 1fr; } .panel { margin-top: 16px; } }
