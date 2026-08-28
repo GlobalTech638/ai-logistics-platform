@@ -1,0 +1,61 @@
+from datetime import datetime, timezone
+
+from app.schemas.trips import TripRecord
+
+SAMPLE_TRIPS = [
+    TripRecord(
+        vehicle_id="KE-KDA-431A",
+        origin="Nairobi",
+        destination="Mombasa",
+        distance_km=485,
+        planned_duration_minutes=420,
+        actual_duration_minutes=575,
+        load_tonnes=18,
+        completed_at=datetime(2026, 8, 20, 16, tzinfo=timezone.utc),
+        country_code="KE",
+    ),
+    TripRecord(
+        vehicle_id="KE-KDB-982P",
+        origin="Nairobi",
+        destination="Mombasa",
+        distance_km=485,
+        planned_duration_minutes=420,
+        actual_duration_minutes=495,
+        load_tonnes=21,
+        completed_at=datetime(2026, 8, 21, 12, tzinfo=timezone.utc),
+        country_code="KE",
+    ),
+    TripRecord(
+        vehicle_id="KE-KDC-120M",
+        origin="Nairobi",
+        destination="Mombasa",
+        distance_km=485,
+        planned_duration_minutes=420,
+        actual_duration_minutes=470,
+        load_tonnes=16,
+        completed_at=datetime(2026, 8, 22, 10, tzinfo=timezone.utc),
+        country_code="KE",
+    ),
+    TripRecord(
+        vehicle_id="UG-UAX-204K",
+        origin="Kampala",
+        destination="Mombasa",
+        distance_km=1160,
+        planned_duration_minutes=1500,
+        actual_duration_minutes=1810,
+        load_tonnes=20,
+        completed_at=datetime(2026, 8, 19, 18, tzinfo=timezone.utc),
+        country_code="UG",
+    ),
+    TripRecord(
+        vehicle_id="TZ-T-482B",
+        origin="Dar es Salaam",
+        destination="Arusha",
+        distance_km=640,
+        planned_duration_minutes=720,
+        actual_duration_minutes=790,
+        load_tonnes=14,
+        completed_at=datetime(2026, 8, 23, 15, tzinfo=timezone.utc),
+        country_code="TZ",
+    ),
+]
