@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Logistics Control Tower</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <div>
+          <p class="eyebrow">PAN-AFRICAN LOGISTICS INTELLIGENCE</p>
+          <h1>AI Logistics Control Tower</h1>
+          <p class="subtitle">Find fleet cost leakage before it becomes lost margin.</p>
+        </div>
+        <div class="status"><span></span> Intelligence engine online</div>
+      </header>
+
+      <section class="metrics" id="metrics"></section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">PRIORITY QUEUE</p>
+              <h2>Vehicles requiring attention</h2>
+            </div>
+          </div>
+          <div id="vehicles" class="vehicle-list"></div>
+        </article>
+
+        <aside class="panel insight">
+          <p class="eyebrow">AI INSIGHT</p>
+          <h2 id="insight-title">Fleet intelligence</h2>
+          <p id="insight-text">Loading operational analysis…</p>
+          <div class="callout" id="insight-action"></div>
+        </aside>
+      </section>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>
