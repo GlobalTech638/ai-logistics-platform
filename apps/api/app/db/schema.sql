@@ -90,8 +90,21 @@ CREATE TABLE IF NOT EXISTS alerts (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS recommendation_actions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    shipment_id UUID REFERENCES shipments(id) ON DELETE SET NULL,
+    recommendation_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'accepted',
+    notes TEXT,
+    acted_by UUID,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_vehicles_org ON vehicles(organization_id);
 CREATE INDEX IF NOT EXISTS idx_shipments_org_status ON shipments(organization_id, status);
 CREATE INDEX IF NOT EXISTS idx_trips_org_completed ON trips(organization_id, completed_at);
 CREATE INDEX IF NOT EXISTS idx_fuel_vehicle_time ON fuel_transactions(vehicle_id, transaction_time);
 CREATE INDEX IF NOT EXISTS idx_alerts_org_status ON alerts(organization_id, status);
+CREATE INDEX IF NOT EXISTS idx_recommendation_actions_org_created ON recommendation_actions(organization_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_recommendation_actions_shipment ON recommendation_actions(shipment_id, created_at DESC);
