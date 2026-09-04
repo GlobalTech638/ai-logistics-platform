@@ -8,6 +8,7 @@ from app.routes.corridors import router as corridors_router
 from app.routes.load_matching import router as load_matching_router
 from app.routes.operations import router as operations_router
 from app.routes.organizations import router as organizations_router
+from app.routes.recommendation_actions import router as recommendation_actions_router
 from app.routes.recommendations import router as recommendations_router
 
 app = FastAPI(
@@ -25,6 +26,7 @@ app.include_router(control_tower_router)
 app.include_router(load_matching_router)
 app.include_router(corridors_router)
 app.include_router(recommendations_router)
+app.include_router(recommendation_actions_router)
 
 
 @app.get("/health", tags=["system"])
