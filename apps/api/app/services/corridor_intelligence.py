@@ -13,15 +13,23 @@ class CorridorRisk:
 def assess_corridor_risk(
     corridor: str,
     delay_rate_pct: float,
-    border_wait_hours: float,
-    incident_rate_pct: float,
+    border_wait_hours: float = 0.0,
+    incident_rate_pct: float = 0.0,
 ) -> CorridorRisk:
-    values = [delay_rate_pct, border_wait_hours * 5, incident_rate_pct]
-    score = min(100.0, max(0.0, sum(values) / len(values)))
+    """Score corridor risk from observed performance and optional external signals."""
+    if min(delay_rate_pct, border_wait_hours, incident_rate_pct) < 0:
+        raise ValueError("Risk inputs cannot be negative")
+
+    delay_component = min(70.0, delay_rate_pct * 2.0)
+    border_component = min(20.0, border_wait_hours * 2.5)
+    incident_component = min(20.0, incident_rate_pct * 2.0)
+    score = min(100.0, delay_component + border_component + incident_component)
 
     factors = []
     if delay_rate_pct >= 20:
         factors.append("elevated delivery delays")
+    elif delay_rate_pct >= 10:
+        factors.append("rising delivery delays")
     if border_wait_hours >= 6:
         factors.append("long border processing times")
     if incident_rate_pct >= 10:
