@@ -5,16 +5,9 @@ from pydantic import BaseModel, Field
 
 from app.auth.tenant import TenantContext, get_tenant_context
 from app.db.database import get_connection
+from app.services.action_tracker import completed_at_for_status, validate_transition
 
 router = APIRouter(prefix="/api/v1/recommendations", tags=["recommendations"])
-
-_ALLOWED_TRANSITIONS = {
-    "proposed": {"accepted", "rejected"},
-    "accepted": {"in_progress", "rejected"},
-    "in_progress": {"completed"},
-    "completed": set(),
-    "rejected": set(),
-}
 
 
 class RecommendationAction(BaseModel):
@@ -104,21 +97,20 @@ def update_recommendation_action_status(
                 raise HTTPException(status_code=404, detail="Recommendation action not found")
 
             current_status = row[0]
-            if payload.status not in _ALLOWED_TRANSITIONS[current_status]:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Cannot transition recommendation action from {current_status} to {payload.status}",
-                )
+            try:
+                validate_transition(current_status, payload.status)
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-            completed_at_sql = "completed_at = now()," if payload.status == "completed" else ""
+            completed_at = completed_at_for_status(payload.status)
             cursor.execute(
-                f"""
+                """
                 UPDATE recommendation_actions
                 SET status = %s,
                     notes = COALESCE(%s, notes),
                     acted_by = %s,
                     updated_at = now(),
-                    {completed_at_sql}
+                    completed_at = COALESCE(%s, completed_at)
                 WHERE id = %s AND organization_id = %s
                 RETURNING id, shipment_id, recommendation_type,
                           priority, recommendation_score, title, rationale,
@@ -129,6 +121,7 @@ def update_recommendation_action_status(
                     payload.status,
                     payload.notes,
                     tenant.user_id,
+                    completed_at,
                     action_id,
                     tenant.organization_id,
                 ),
