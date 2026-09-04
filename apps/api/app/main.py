@@ -4,6 +4,7 @@ from app.routes import fleet_router
 from app.routes.analytics import router as analytics_router
 from app.routes.alerts import router as alerts_router
 from app.routes.control_tower import router as control_tower_router
+from app.routes.corridors import router as corridors_router
 from app.routes.load_matching import router as load_matching_router
 from app.routes.operations import router as operations_router
 from app.routes.organizations import router as organizations_router
@@ -21,6 +22,7 @@ app.include_router(operations_router)
 app.include_router(alerts_router)
 app.include_router(control_tower_router)
 app.include_router(load_matching_router)
+app.include_router(corridors_router)
 
 
 @app.get("/health", tags=["system"])
