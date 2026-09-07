@@ -23,6 +23,53 @@ class RecommendationAction(BaseModel):
 class RecommendationActionStatus(BaseModel):
     status: str = Field(pattern="^(accepted|in_progress|completed|rejected)$")
     notes: str | None = Field(default=None, max_length=2000)
+    vehicle_id: UUID | None = None
+
+
+def _execute_reassignment(cursor, organization_id: UUID, shipment_id: UUID, vehicle_id: UUID | None) -> str:
+    if vehicle_id is None:
+        raise HTTPException(status_code=422, detail="vehicle_id is required to start a reassign_vehicle action")
+
+    cursor.execute(
+        """
+        SELECT s.weight_tonnes, v.capacity_tonnes, v.active
+        FROM shipments s CROSS JOIN vehicles v
+        WHERE s.id = %s AND s.organization_id = %s
+          AND v.id = %s AND v.organization_id = %s
+        """,
+        (shipment_id, organization_id, vehicle_id, organization_id),
+    )
+    assignment = cursor.fetchone()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Shipment or replacement vehicle not found")
+
+    weight_tonnes, capacity_tonnes, active = assignment
+    if not active:
+        raise HTTPException(status_code=409, detail="Replacement vehicle is inactive")
+    if capacity_tonnes is not None and capacity_tonnes < weight_tonnes:
+        raise HTTPException(status_code=409, detail="Replacement vehicle capacity is below shipment weight")
+
+    cursor.execute(
+        """
+        SELECT id, vehicle_id FROM trips
+        WHERE organization_id = %s AND shipment_id = %s AND completed_at IS NULL
+        ORDER BY id DESC LIMIT 1 FOR UPDATE
+        """,
+        (organization_id, shipment_id),
+    )
+    trip = cursor.fetchone()
+    if not trip:
+        raise HTTPException(status_code=409, detail="No active trip assignment found for shipment")
+
+    trip_id, previous_vehicle_id = trip
+    if previous_vehicle_id == vehicle_id:
+        return f"Trip {trip_id} already assigned to vehicle {vehicle_id}"
+
+    cursor.execute(
+        "UPDATE trips SET vehicle_id = %s WHERE id = %s AND organization_id = %s",
+        (vehicle_id, trip_id, organization_id),
+    )
+    return f"Trip {trip_id} reassigned from vehicle {previous_vehicle_id} to {vehicle_id}"
 
 
 @router.post("/{organization_id}/shipments/{shipment_id}/actions")
@@ -50,25 +97,14 @@ def record_recommendation_action(
                     organization_id, shipment_id, recommendation_type,
                     priority, recommendation_score, title, rationale,
                     expected_impact, status, notes, acted_by
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'proposed', %s, %s)
-                RETURNING id, organization_id, shipment_id,
-                          recommendation_type, priority, recommendation_score,
-                          title, rationale, expected_impact, status,
-                          notes, acted_by, created_at, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'proposed', %s, %s)
+                RETURNING id, organization_id, shipment_id, recommendation_type,
+                          priority, recommendation_score, title, rationale,
+                          expected_impact, status, notes, acted_by, created_at, updated_at
                 """,
-                (
-                    organization_id,
-                    shipment_id,
-                    action.recommendation_type,
-                    action.priority,
-                    action.recommendation_score,
-                    action.title,
-                    action.rationale,
-                    action.expected_impact,
-                    action.notes,
-                    tenant.user_id,
-                ),
+                (organization_id, shipment_id, action.recommendation_type,
+                 action.priority, action.recommendation_score, action.title,
+                 action.rationale, action.expected_impact, action.notes, tenant.user_id),
             )
             row = cursor.fetchone()
             columns = [item.name for item in cursor.description]
@@ -86,9 +122,9 @@ def update_recommendation_action_status(
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT status
+                SELECT status, shipment_id, recommendation_type, notes
                 FROM recommendation_actions
-                WHERE id = %s AND organization_id = %s
+                WHERE id = %s AND organization_id = %s FOR UPDATE
                 """,
                 (action_id, tenant.organization_id),
             )
@@ -96,35 +132,37 @@ def update_recommendation_action_status(
             if not row:
                 raise HTTPException(status_code=404, detail="Recommendation action not found")
 
-            current_status = row[0]
+            current_status, shipment_id, recommendation_type, current_notes = row
             try:
                 validate_transition(current_status, payload.status)
             except ValueError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+            execution_note = None
+            if payload.status == "in_progress" and recommendation_type == "reassign_vehicle":
+                if shipment_id is None:
+                    raise HTTPException(status_code=409, detail="Reassignment action has no shipment")
+                execution_note = _execute_reassignment(
+                    cursor, tenant.organization_id, shipment_id, payload.vehicle_id
+                )
+
+            notes = payload.notes if payload.notes is not None else current_notes
+            if execution_note:
+                notes = f"{notes}\nExecution: {execution_note}" if notes else f"Execution: {execution_note}"
+
             completed_at = completed_at_for_status(payload.status)
             cursor.execute(
                 """
                 UPDATE recommendation_actions
-                SET status = %s,
-                    notes = COALESCE(%s, notes),
-                    acted_by = %s,
-                    updated_at = now(),
-                    completed_at = COALESCE(%s, completed_at)
+                SET status = %s, notes = %s, acted_by = %s,
+                    updated_at = now(), completed_at = COALESCE(%s, completed_at)
                 WHERE id = %s AND organization_id = %s
-                RETURNING id, shipment_id, recommendation_type,
-                          priority, recommendation_score, title, rationale,
-                          expected_impact, status, notes, acted_by,
-                          created_at, updated_at, completed_at
+                RETURNING id, shipment_id, recommendation_type, priority,
+                          recommendation_score, title, rationale, expected_impact,
+                          status, notes, acted_by, created_at, updated_at, completed_at
                 """,
-                (
-                    payload.status,
-                    payload.notes,
-                    tenant.user_id,
-                    completed_at,
-                    action_id,
-                    tenant.organization_id,
-                ),
+                (payload.status, notes, tenant.user_id, completed_at,
+                 action_id, tenant.organization_id),
             )
             updated = cursor.fetchone()
             columns = [item.name for item in cursor.description]
@@ -144,21 +182,16 @@ def list_recommendation_actions(
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT id, shipment_id, recommendation_type,
-                       priority, recommendation_score, title, rationale,
-                       expected_impact, status, notes, acted_by,
-                       created_at, updated_at, completed_at
+                SELECT id, shipment_id, recommendation_type, priority,
+                       recommendation_score, title, rationale, expected_impact,
+                       status, notes, acted_by, created_at, updated_at, completed_at
                 FROM recommendation_actions
                 WHERE organization_id = %s
-                ORDER BY created_at DESC
-                LIMIT 100
+                ORDER BY created_at DESC LIMIT 100
                 """,
                 (organization_id,),
             )
             rows = cursor.fetchall()
             columns = [item.name for item in cursor.description]
 
-    return {
-        "organization_id": str(organization_id),
-        "actions": [dict(zip(columns, row)) for row in rows],
-    }
+    return {"organization_id": str(organization_id), "actions": [dict(zip(columns, row)) for row in rows]}
