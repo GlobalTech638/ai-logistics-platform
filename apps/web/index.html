@@ -24,10 +24,12 @@
           <div class="panel-head">
             <div>
               <p class="eyebrow">PRIORITY QUEUE</p>
-              <h2>Vehicles requiring attention</h2>
+              <h2>AI recommendations</h2>
             </div>
           </div>
-          <div id="vehicles" class="vehicle-list"></div>
+          <div id="recommendations" class="recommendation-list">
+            <div class="empty">Loading recommendations…</div>
+          </div>
         </article>
 
         <aside class="panel insight">
@@ -36,6 +38,19 @@
           <p id="insight-text">Loading operational analysis…</p>
           <div class="callout" id="insight-action"></div>
         </aside>
+      </section>
+
+      <section class="panel action-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">DECISION LOG</p>
+            <h2>Recent operator actions</h2>
+          </div>
+          <span id="action-count" class="badge">0</span>
+        </div>
+        <div id="actions" class="action-list">
+          <div class="empty">No actions recorded yet.</div>
+        </div>
       </section>
     </main>
     <script src="./app.js"></script>
