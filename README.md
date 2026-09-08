@@ -26,6 +26,7 @@ Core questions the platform is designed to answer:
 - Recommendation action lifecycle: proposed → accepted → in_progress → completed.
 - Vehicle reassignment execution with capacity, active-status, and trip-lock validation.
 - Shipment rerouting through persisted route plans with one active route per shipment.
+- Database-level route-plan lifecycle constraints and one-active-route invariant.
 - Control Tower overview metrics and alert lifecycle management.
 - Responsive browser dashboard for operational review and action execution.
 
@@ -65,7 +66,7 @@ Docker Compose is provided at the repository root:
 docker compose up --build
 ```
 
-The migration directory is present under `apps/api/migrations`. Migration execution should be treated as deployment infrastructure work; `001_initial.sql` currently establishes migration tracking rather than replacing the canonical bootstrap schema.
+The migration directory is present under `apps/api/migrations`. `001_initial.sql` currently establishes migration tracking rather than replacing the canonical bootstrap schema. Existing databases should apply migrations in order; `002_route_plans.sql` adds route-plan persistence and `003_route_plan_invariants.sql` enforces its lifecycle and one-active-route invariant.
 
 ## API workflow
 
