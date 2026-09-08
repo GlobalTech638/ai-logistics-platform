@@ -22,44 +22,86 @@ def fleet_intelligence(
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT v.id, v.vehicle_id, v.odometer_km,
-                       COALESCE(AVG(ft.litres), 0) AS avg_fuel_litres,
-                       COUNT(DISTINCT me.id) AS maintenance_events,
-                       COUNT(DISTINCT t.id) AS trips
+                SELECT
+                    v.id,
+                    v.registration_number,
+                    v.odometer_km,
+                    v.expected_litres_per_100km,
+                    COALESCE(SUM(ft.litres), 0) AS actual_fuel_litres,
+                    COALESCE(SUM((t.distance_km / 100.0) * v.expected_litres_per_100km), 0)
+                        AS expected_fuel_litres,
+                    COUNT(DISTINCT me.id) AS maintenance_events,
+                    COUNT(DISTINCT t.id) AS trips,
+                    COUNT(DISTINCT CASE WHEN t.completed_at IS NULL THEN t.id END) AS active_trips
                 FROM vehicles v
-                LEFT JOIN fuel_transactions ft ON ft.vehicle_id = v.id
-                LEFT JOIN maintenance_events me ON me.vehicle_id = v.id
-                LEFT JOIN trips t ON t.vehicle_id = v.id
+                LEFT JOIN fuel_transactions ft
+                    ON ft.vehicle_id = v.id
+                    AND ft.organization_id = v.organization_id
+                LEFT JOIN trips t
+                    ON t.vehicle_id = v.id
+                    AND t.organization_id = v.organization_id
+                LEFT JOIN maintenance_events me
+                    ON me.vehicle_id = v.id
+                    AND me.organization_id = v.organization_id
                 WHERE v.organization_id = %s
-                GROUP BY v.id, v.vehicle_id, v.odometer_km
-                ORDER BY v.vehicle_id
+                GROUP BY v.id, v.registration_number, v.odometer_km,
+                         v.expected_litres_per_100km
+                ORDER BY v.registration_number
                 """,
                 (organization_id,),
             )
             rows = cursor.fetchall()
 
     result = []
-    for vehicle_id, external_id, odometer, avg_fuel, maintenance_events, trips in rows:
-        fuel_score = min(100.0, float(avg_fuel) * 4)
+    for (
+        vehicle_id,
+        registration_number,
+        odometer,
+        expected_litres_per_100km,
+        actual_fuel_litres,
+        expected_fuel_litres,
+        maintenance_events,
+        trips,
+        active_trips,
+    ) in rows:
+        expected = float(expected_fuel_litres or 0)
+        actual = float(actual_fuel_litres or 0)
+        fuel_variance_pct = 0.0 if expected <= 0 else max(0.0, ((actual - expected) / expected) * 100)
+        fuel_score = min(100.0, fuel_variance_pct * 2)
+
+        # This is an operational baseline until service intervals are modeled explicitly.
         maintenance_score = min(100.0, float(maintenance_events) * 15)
-        utilization_score = 0.0 if trips > 10 else 35.0
-        health = calculate_vehicle_health(external_id, fuel_score, maintenance_score, utilization_score)
-        alerts = build_alerts(external_id, fuel_score, maintenance_score, utilization_score)
-        result.append({
-            "vehicle_id": external_id,
-            "odometer_km": float(odometer or 0),
-            "health": {
-                "score": health.health_score,
-                "status": health.status,
-                "priority": health.priority,
-            },
-            "signals": {
-                "fuel": round(fuel_score, 1),
-                "maintenance": round(maintenance_score, 1),
-                "utilization": round(utilization_score, 1),
-            },
-            "alerts": [a.__dict__ for a in alerts],
-        })
+        utilization_score = min(100.0, (float(active_trips) * 20) + (float(trips) * 2))
+
+        health = calculate_vehicle_health(
+            registration_number,
+            fuel_score,
+            maintenance_score,
+            utilization_score,
+        )
+        alerts = build_alerts(
+            registration_number,
+            fuel_score,
+            maintenance_score,
+            utilization_score,
+        )
+        result.append(
+            {
+                "vehicle_id": registration_number,
+                "odometer_km": float(odometer or 0),
+                "health": {
+                    "score": health.health_score,
+                    "status": health.status,
+                    "priority": health.priority,
+                },
+                "signals": {
+                    "fuel": round(fuel_score, 1),
+                    "maintenance": round(maintenance_score, 1),
+                    "utilization": round(utilization_score, 1),
+                },
+                "alerts": [a.__dict__ for a in alerts],
+            }
+        )
     return result
 
 
