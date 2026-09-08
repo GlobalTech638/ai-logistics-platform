@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS trips (
 CREATE TABLE IF NOT EXISTS fuel_transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    vehicle_id UUID NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+    vehicle_id UUID NOT NULL REFERENCES vehicles(id),
     trip_id UUID REFERENCES trips(id),
     transaction_time TIMESTAMPTZ NOT NULL,
     litres NUMERIC(12,3) NOT NULL CHECK (litres > 0),
@@ -108,6 +108,19 @@ CREATE TABLE IF NOT EXISTS recommendation_actions (
     completed_at TIMESTAMPTZ
 );
 
+CREATE TABLE IF NOT EXISTS shipment_route_plans (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    shipment_id UUID NOT NULL REFERENCES shipments(id) ON DELETE CASCADE,
+    corridor TEXT NOT NULL,
+    route_sequence INTEGER NOT NULL DEFAULT 1 CHECK (route_sequence > 0),
+    status TEXT NOT NULL DEFAULT 'planned',
+    reroute_reason TEXT,
+    selected_by TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_vehicles_org ON vehicles(organization_id);
 CREATE INDEX IF NOT EXISTS idx_shipments_org_status ON shipments(organization_id, status);
 CREATE INDEX IF NOT EXISTS idx_trips_org_completed ON trips(organization_id, completed_at);
@@ -116,3 +129,5 @@ CREATE INDEX IF NOT EXISTS idx_alerts_org_status ON alerts(organization_id, stat
 CREATE INDEX IF NOT EXISTS idx_recommendation_actions_org_created ON recommendation_actions(organization_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_recommendation_actions_org_status ON recommendation_actions(organization_id, status);
 CREATE INDEX IF NOT EXISTS idx_recommendation_actions_shipment ON recommendation_actions(shipment_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_shipment_route_plans_org_shipment ON shipment_route_plans(organization_id, shipment_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_shipment_route_plans_corridor ON shipment_route_plans(organization_id, corridor, status);
