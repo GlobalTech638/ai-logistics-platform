@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS recommendation_actions (
     expected_impact TEXT,
     status TEXT NOT NULL DEFAULT 'proposed',
     notes TEXT,
-    acted_by UUID,
+    acted_by TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     completed_at TIMESTAMPTZ
