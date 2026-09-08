@@ -44,11 +44,11 @@ def organization_vehicles(
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT id, vehicle_id, registration_number, vehicle_type,
-                       capacity_tonnes, odometer_km, status
+                SELECT id, registration_number, make, model,
+                       fuel_type, capacity_tonnes, odometer_km, active
                 FROM vehicles
                 WHERE organization_id = %s
-                ORDER BY vehicle_id
+                ORDER BY registration_number
                 """,
                 (organization_id,),
             )
