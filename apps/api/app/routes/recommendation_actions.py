@@ -8,6 +8,7 @@ from app.db.database import get_connection
 from app.services.action_tracker import completed_at_for_status, validate_transition
 
 router = APIRouter(prefix="/api/v1/recommendations", tags=["recommendations"])
+ACTION_ROLES = {"admin", "operations_manager", "fleet_manager"}
 
 
 class RecommendationAction(BaseModel):
@@ -24,6 +25,11 @@ class RecommendationActionStatus(BaseModel):
     status: str = Field(pattern="^(accepted|in_progress|completed|rejected)$")
     notes: str | None = Field(default=None, max_length=2000)
     vehicle_id: UUID | None = None
+
+
+def _require_action_role(tenant: TenantContext) -> None:
+    if tenant.role not in ACTION_ROLES:
+        raise HTTPException(status_code=403, detail="Role is not authorized to execute recommendations")
 
 
 def _execute_reassignment(cursor, organization_id: UUID, shipment_id: UUID, vehicle_id: UUID | None) -> str:
@@ -81,6 +87,7 @@ def record_recommendation_action(
 ) -> dict:
     if organization_id != tenant.organization_id:
         raise HTTPException(status_code=403, detail="Organization access denied")
+    _require_action_role(tenant)
 
     with get_connection() as connection:
         with connection.cursor() as cursor:
@@ -118,6 +125,8 @@ def update_recommendation_action_status(
     payload: RecommendationActionStatus,
     tenant: TenantContext = Depends(get_tenant_context),
 ) -> dict:
+    _require_action_role(tenant)
+
     with get_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
