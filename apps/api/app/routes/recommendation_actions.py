@@ -78,6 +78,34 @@ def _execute_reassignment(cursor, organization_id: UUID, shipment_id: UUID, vehi
     return f"Trip {trip_id} reassigned from vehicle {previous_vehicle_id} to {vehicle_id}"
 
 
+def _execute_reroute(cursor, organization_id: UUID, shipment_id: UUID, actor: str, reason: str | None) -> str:
+    cursor.execute(
+        """
+        SELECT id, corridor, route_sequence
+        FROM shipment_route_plans
+        WHERE organization_id = %s AND shipment_id = %s AND status = 'planned'
+        ORDER BY route_sequence DESC, created_at DESC
+        LIMIT 1
+        FOR UPDATE
+        """,
+        (organization_id, shipment_id),
+    )
+    route = cursor.fetchone()
+    if not route:
+        raise HTTPException(status_code=409, detail="No planned route exists for shipment")
+
+    route_id, corridor, route_sequence = route
+    cursor.execute(
+        """
+        UPDATE shipment_route_plans
+        SET status = 'rerouted', reroute_reason = %s, selected_by = %s, updated_at = now()
+        WHERE id = %s AND organization_id = %s
+        """,
+        (reason or "AI recommendation accepted", actor, route_id, organization_id),
+    )
+    return f"Route plan {route_id} on corridor {corridor} marked rerouted at sequence {route_sequence}"
+
+
 @router.post("/{organization_id}/shipments/{shipment_id}/actions")
 def record_recommendation_action(
     organization_id: UUID,
@@ -131,7 +159,7 @@ def update_recommendation_action_status(
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT status, shipment_id, recommendation_type, notes
+                SELECT status, shipment_id, recommendation_type, notes, rationale
                 FROM recommendation_actions
                 WHERE id = %s AND organization_id = %s FOR UPDATE
                 """,
@@ -141,7 +169,7 @@ def update_recommendation_action_status(
             if not row:
                 raise HTTPException(status_code=404, detail="Recommendation action not found")
 
-            current_status, shipment_id, recommendation_type, current_notes = row
+            current_status, shipment_id, recommendation_type, current_notes, rationale = row
             try:
                 validate_transition(current_status, payload.status)
             except ValueError as exc:
@@ -153,6 +181,12 @@ def update_recommendation_action_status(
                     raise HTTPException(status_code=409, detail="Reassignment action has no shipment")
                 execution_note = _execute_reassignment(
                     cursor, tenant.organization_id, shipment_id, payload.vehicle_id
+                )
+            elif payload.status == "in_progress" and recommendation_type == "reroute_shipment":
+                if shipment_id is None:
+                    raise HTTPException(status_code=409, detail="Reroute action has no shipment")
+                execution_note = _execute_reroute(
+                    cursor, tenant.organization_id, shipment_id, tenant.user_id, rationale
                 )
 
             notes = payload.notes if payload.notes is not None else current_notes
