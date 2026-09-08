@@ -6,6 +6,7 @@ from app.auth.tenant import TenantContext, get_tenant_context
 from app.db.database import get_connection
 from app.services.alert_engine import build_alerts
 from app.services.vehicle_health import calculate_vehicle_health
+from app.services.vehicle_health_signals import calculate_vehicle_health_signals
 
 router = APIRouter(prefix="/api/v1/fleet", tags=["fleet-intelligence"])
 
@@ -87,26 +88,24 @@ def fleet_intelligence(
         trips,
         active_trips,
     ) in rows:
-        expected = float(expected_fuel_litres or 0)
-        actual = float(actual_fuel_litres or 0)
-        fuel_variance_pct = 0.0 if expected <= 0 else max(0.0, ((actual - expected) / expected) * 100)
-        fuel_score = min(100.0, fuel_variance_pct * 2)
-
-        # This is an operational baseline until service intervals are modeled explicitly.
-        maintenance_score = min(100.0, float(maintenance_events) * 15)
-        utilization_score = min(100.0, (float(active_trips) * 20) + (float(trips) * 2))
-
+        signals = calculate_vehicle_health_signals(
+            actual_fuel_litres=float(actual_fuel_litres or 0),
+            expected_fuel_litres=float(expected_fuel_litres or 0),
+            maintenance_events=int(maintenance_events or 0),
+            trips=int(trips or 0),
+            active_trips=int(active_trips or 0),
+        )
         health = calculate_vehicle_health(
             registration_number,
-            fuel_score,
-            maintenance_score,
-            utilization_score,
+            fuel_anomaly_score=signals.fuel_score,
+            maintenance_risk_score=signals.maintenance_score,
+            corridor_risk_score=0.0,
         )
         alerts = build_alerts(
             registration_number,
-            fuel_score,
-            maintenance_score,
-            utilization_score,
+            signals.fuel_score,
+            signals.maintenance_score,
+            signals.utilization_score,
         )
         result.append(
             {
@@ -118,9 +117,9 @@ def fleet_intelligence(
                     "priority": health.priority,
                 },
                 "signals": {
-                    "fuel": round(fuel_score, 1),
-                    "maintenance": round(maintenance_score, 1),
-                    "utilization": round(utilization_score, 1),
+                    "fuel": round(signals.fuel_score, 1),
+                    "maintenance": round(signals.maintenance_score, 1),
+                    "utilization": round(signals.utilization_score, 1),
                 },
                 "alerts": [a.__dict__ for a in alerts],
             }
