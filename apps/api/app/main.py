@@ -10,6 +10,7 @@ from app.routes.operations import router as operations_router
 from app.routes.organizations import router as organizations_router
 from app.routes.recommendation_actions import router as recommendation_actions_router
 from app.routes.recommendations import router as recommendations_router
+from app.routes.route_plans import router as route_plans_router
 
 app = FastAPI(
     title="Pan-African Logistics AI Platform",
@@ -27,6 +28,7 @@ app.include_router(load_matching_router)
 app.include_router(corridors_router)
 app.include_router(recommendations_router)
 app.include_router(recommendation_actions_router)
+app.include_router(route_plans_router)
 
 
 @app.get("/health", tags=["system"])
