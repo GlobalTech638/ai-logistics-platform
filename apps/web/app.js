@@ -2,8 +2,10 @@ const API = window.LOGISTICS_API_URL || "http://localhost:8000";
 const ORGANIZATION_ID = window.LOGISTICS_ORGANIZATION_ID || "";
 const USER_ID = window.LOGISTICS_USER_ID || "dashboard-user";
 const USER_ROLE = window.LOGISTICS_USER_ROLE || "viewer";
+const CAN_EXECUTE = ["admin", "operations_manager", "fleet_manager"].includes(USER_ROLE);
 
 let vehicles = [];
+let routePlansByShipment = new Map();
 
 const headers = () => ({
   "Content-Type": "application/json",
@@ -40,9 +42,18 @@ function recommendationCard(shipment, recommendation) {
   const impact = recommendation.expected_impact || "Operational impact not quantified yet.";
   const fuel = shipment.fuel_cost_impact;
   const reassign = recommendation.recommendation_type === "reassign_vehicle";
+  const reroute = recommendation.recommendation_type === "reroute_shipment";
   const vehicleOptions = vehicles.filter((vehicle) => vehicle.active).map((vehicle) =>
     `<option value="${escapeHtml(vehicle.id)}">${escapeHtml(vehicle.registration_number)} · ${escapeHtml(vehicle.make)} ${escapeHtml(vehicle.model)}</option>`
   ).join("");
+  const routeOptions = (routePlansByShipment.get(shipment.shipment_id) || []).filter((plan) => plan.status === "planned").map((plan) =>
+    `<option value="${escapeHtml(plan.id)}">${escapeHtml(plan.corridor)} · sequence ${escapeHtml(plan.route_sequence)}</option>`
+  ).join("");
+  const executionControls = !CAN_EXECUTE
+    ? `<small class="permission-note">Viewer/analyst access: execution controls are disabled.</small>`
+    : reroute
+      ? `<select class="route-plan-select" aria-label="Route plan"><option value="">Select route plan</option>${routeOptions}</select><button class="action-button" data-action="accept">Accept recommendation</button>`
+      : `${reassign ? `<select class="vehicle-select" aria-label="Replacement vehicle"><option value="">Select replacement vehicle</option>${vehicleOptions}</select>` : ""}<button class="action-button" data-action="accept">Accept recommendation</button>`;
 
   return `
     <article class="recommendation" data-shipment-id="${escapeHtml(shipment.shipment_id)}" data-recommendation-type="${escapeHtml(recommendation.recommendation_type)}">
@@ -57,10 +68,7 @@ function recommendationCard(shipment, recommendation) {
       <p class="rationale">${escapeHtml(recommendation.rationale)}</p>
       <div class="impact"><span>Expected impact</span><strong>${escapeHtml(impact)}</strong></div>
       ${fuel.estimated_excess_cost > 0 ? `<div class="fuel-impact">Estimated excess fuel: <strong>${money(fuel.estimated_excess_cost, fuel.currency)}</strong></div>` : ""}
-      <div class="recommendation-actions">
-        ${reassign ? `<select class="vehicle-select" aria-label="Replacement vehicle"><option value="">Select replacement vehicle</option>${vehicleOptions}</select>` : ""}
-        <button class="action-button" data-action="accept">Accept recommendation</button>
-      </div>
+      <div class="recommendation-actions">${executionControls}</div>
       <div class="card-status" aria-live="polite"></div>
     </article>`;
 }
@@ -84,6 +92,7 @@ async function handleAccept(event) {
   const recommendationType = card.dataset.recommendationType;
   const status = card.querySelector(".card-status");
   const vehicleSelect = card.querySelector(".vehicle-select");
+  const routePlanSelect = card.querySelector(".route-plan-select");
   const button = event.currentTarget;
 
   button.disabled = true;
@@ -115,18 +124,18 @@ async function handleAccept(event) {
     if (recommendationType === "reassign_vehicle") {
       const vehicleId = vehicleSelect?.value;
       if (!vehicleId) {
-        status.textContent = "Accepted. Select a replacement vehicle, then continue execution from the decision log.";
+        status.textContent = "Accepted. Select a replacement vehicle, then execute from the decision log.";
       } else {
-        const executeResponse = await fetch(`${API}/api/v1/recommendations/actions/${action.id}/status`, {
-          method: "PATCH",
-          headers: headers(),
-          body: JSON.stringify({ status: "in_progress", vehicle_id: vehicleId }),
-        });
-        if (!executeResponse.ok) {
-          const error = await executeResponse.json().catch(() => ({}));
-          throw new Error(error.detail || `Execution failed (${executeResponse.status})`);
-        }
+        await executeAction(action.id, { status: "in_progress", vehicle_id: vehicleId });
         status.textContent = "Accepted and executed. Vehicle reassignment recorded.";
+      }
+    } else if (recommendationType === "reroute_shipment") {
+      const routePlanId = routePlanSelect?.value;
+      if (!routePlanId) {
+        status.textContent = "Accepted. Select a route plan, then execute from the decision log.";
+      } else {
+        await executeAction(action.id, { status: "in_progress", route_plan_id: routePlanId });
+        status.textContent = "Accepted and executed. Route plan activated.";
       }
     } else {
       status.textContent = "Accepted. Execution is tracked in the decision log.";
@@ -137,6 +146,26 @@ async function handleAccept(event) {
     status.textContent = error.message;
     button.disabled = false;
   }
+}
+
+async function executeAction(actionId, payload) {
+  const response = await fetch(`${API}/api/v1/recommendations/actions/${actionId}/status`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || `Execution failed (${response.status})`);
+  }
+  return response.json();
+}
+
+async function loadRoutePlans(shipmentId) {
+  const response = await fetch(`${API}/api/v1/route-plans/${ORGANIZATION_ID}/shipments/${shipmentId}`, { headers: headers() });
+  if (!response.ok) throw new Error(`Route plans request failed: ${response.status}`);
+  const data = await response.json();
+  routePlansByShipment.set(shipmentId, data.route_plans || []);
 }
 
 async function loadActions() {
@@ -179,8 +208,14 @@ async function loadDashboard() {
     if (!vehiclesResponse.ok) throw new Error(`Vehicles request failed: ${vehiclesResponse.status}`);
 
     vehicles = await vehiclesResponse.json();
+    const recommendations = await recommendationsResponse.json();
+    const rerouteShipmentIds = recommendations.shipments
+      .filter((shipment) => shipment.recommendations.some((item) => item.recommendation_type === "reroute_shipment"))
+      .map((shipment) => shipment.shipment_id);
+    await Promise.all(rerouteShipmentIds.map(loadRoutePlans));
+
     renderSummary(await overviewResponse.json());
-    renderRecommendations(await recommendationsResponse.json());
+    renderRecommendations(recommendations);
     await loadActions();
   } catch (error) {
     document.querySelector("#insight-title").textContent = "Control Tower unavailable";
