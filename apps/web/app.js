@@ -40,7 +40,7 @@ function renderSummary(data) {
 
 function recommendationCard(shipment, recommendation) {
   const impact = recommendation.expected_impact || "Operational impact not quantified yet.";
-  const fuel = shipment.fuel_cost_impact;
+  const fuel = shipment.fuel_cost_impact || { estimated_excess_cost: 0, currency: "KES" };
   const reassign = recommendation.recommendation_type === "reassign_vehicle";
   const reroute = recommendation.recommendation_type === "reroute_shipment";
   const vehicleOptions = vehicles.filter((vehicle) => vehicle.active).map((vehicle) =>
@@ -95,6 +95,16 @@ async function handleAccept(event) {
   const routePlanSelect = card.querySelector(".route-plan-select");
   const button = event.currentTarget;
 
+  if (["reassign_vehicle", "reroute_shipment"].includes(recommendationType)) {
+    const selected = vehicleSelect?.value || routePlanSelect?.value;
+    if (!selected) {
+      status.textContent = recommendationType === "reassign_vehicle"
+        ? "Select a replacement vehicle before accepting this executable recommendation."
+        : "Select a route plan before accepting this executable recommendation.";
+      return;
+    }
+  }
+
   button.disabled = true;
   status.textContent = "Recording operator decision…";
 
@@ -122,21 +132,11 @@ async function handleAccept(event) {
     if (!acceptedResponse.ok) throw new Error(`Could not accept action (${acceptedResponse.status})`);
 
     if (recommendationType === "reassign_vehicle") {
-      const vehicleId = vehicleSelect?.value;
-      if (!vehicleId) {
-        status.textContent = "Accepted. Select a replacement vehicle, then execute from the decision log.";
-      } else {
-        await executeAction(action.id, { status: "in_progress", vehicle_id: vehicleId });
-        status.textContent = "Accepted and executed. Vehicle reassignment recorded.";
-      }
+      await executeAction(action.id, { status: "in_progress", vehicle_id: vehicleSelect.value });
+      status.textContent = "Accepted and executed. Vehicle reassignment recorded.";
     } else if (recommendationType === "reroute_shipment") {
-      const routePlanId = routePlanSelect?.value;
-      if (!routePlanId) {
-        status.textContent = "Accepted. Select a route plan, then execute from the decision log.";
-      } else {
-        await executeAction(action.id, { status: "in_progress", route_plan_id: routePlanId });
-        status.textContent = "Accepted and executed. Route plan activated.";
-      }
+      await executeAction(action.id, { status: "in_progress", route_plan_id: routePlanSelect.value });
+      status.textContent = "Accepted and executed. Route plan activated.";
     } else {
       status.textContent = "Accepted. Execution is tracked in the decision log.";
     }
@@ -162,10 +162,15 @@ async function executeAction(actionId, payload) {
 }
 
 async function loadRoutePlans(shipmentId) {
-  const response = await fetch(`${API}/api/v1/route-plans/${ORGANIZATION_ID}/shipments/${shipmentId}`, { headers: headers() });
-  if (!response.ok) throw new Error(`Route plans request failed: ${response.status}`);
-  const data = await response.json();
-  routePlansByShipment.set(shipmentId, data.route_plans || []);
+  try {
+    const response = await fetch(`${API}/api/v1/route-plans/${ORGANIZATION_ID}/shipments/${shipmentId}`, { headers: headers() });
+    if (!response.ok) throw new Error(`Route plans request failed: ${response.status}`);
+    const data = await response.json();
+    routePlansByShipment.set(shipmentId, data.route_plans || []);
+  } catch (error) {
+    routePlansByShipment.set(shipmentId, []);
+    console.warn(`Could not load route plans for ${shipmentId}:`, error);
+  }
 }
 
 async function loadActions() {
@@ -179,13 +184,38 @@ async function loadActions() {
       container.innerHTML = `<div class="empty">No operator decisions recorded yet.</div>`;
       return;
     }
-    container.innerHTML = data.actions.map((action) => `
-      <div class="action-row">
-        <div><strong>${escapeHtml(action.title || action.recommendation_type)}</strong><small>${escapeHtml(action.recommendation_type)} · ${escapeHtml(action.shipment_id || "No shipment")}</small></div>
-        <span class="action-status status-${escapeHtml(action.status)}">${escapeHtml(action.status.replaceAll("_", " "))}</span>
-      </div>`).join("");
+    container.innerHTML = data.actions.map((action) => {
+      const executable = CAN_EXECUTE && action.status === "accepted" && ["reassign_vehicle", "reroute_shipment"].includes(action.recommendation_type);
+      const control = executable
+        ? action.recommendation_type === "reassign_vehicle"
+          ? `<select class="log-vehicle-select" data-action-id="${escapeHtml(action.id)}" aria-label="Replacement vehicle"><option value="">Select vehicle</option>${vehicles.filter((vehicle) => vehicle.active).map((vehicle) => `<option value="${escapeHtml(vehicle.id)}">${escapeHtml(vehicle.registration_number)}</option>`).join("")}</select><button class="action-button log-execute" data-action-id="${escapeHtml(action.id)}">Execute</button>`
+          : `<select class="log-route-select" data-action-id="${escapeHtml(action.id)}" data-shipment-id="${escapeHtml(action.shipment_id || "")}" aria-label="Route plan"><option value="">Select route plan</option>${(routePlansByShipment.get(action.shipment_id) || []).filter((plan) => plan.status === "planned").map((plan) => `<option value="${escapeHtml(plan.id)}">${escapeHtml(plan.corridor)} · ${escapeHtml(plan.route_sequence)}</option>`).join("")}</select><button class="action-button log-execute" data-action-id="${escapeHtml(action.id)}">Execute</button>`
+        : "";
+      return `<div class="action-row"><div><strong>${escapeHtml(action.title || action.recommendation_type)}</strong><small>${escapeHtml(action.recommendation_type)} · ${escapeHtml(action.shipment_id || "No shipment")}</small></div><div class="action-row-controls">${control}<span class="action-status status-${escapeHtml(action.status)}">${escapeHtml(action.status.replaceAll("_", " "))}</span></div></div>`;
+    }).join("");
+    container.querySelectorAll(".log-execute").forEach((button) => button.addEventListener("click", handleLogExecute));
   } catch (error) {
     container.innerHTML = `<div class="empty">Decision log unavailable: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function handleLogExecute(event) {
+  const button = event.currentTarget;
+  const actionId = button.dataset.actionId;
+  const row = button.closest(".action-row");
+  const routeSelect = row.querySelector(".log-route-select");
+  const vehicleSelect = row.querySelector(".log-vehicle-select");
+  const payload = { status: "in_progress" };
+  if (routeSelect) payload.route_plan_id = routeSelect.value;
+  if (vehicleSelect) payload.vehicle_id = vehicleSelect.value;
+  if (!payload.route_plan_id && !payload.vehicle_id) return;
+  button.disabled = true;
+  try {
+    await executeAction(actionId, payload);
+    await loadActions();
+  } catch (error) {
+    button.disabled = false;
+    window.alert(error.message);
   }
 }
 
