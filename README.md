@@ -1,32 +1,115 @@
-# AI Logistics Platform
+# Pan-African Logistics AI Platform
 
-AI-powered logistics operations and fleet cost optimization platform.
+AI-powered logistics operations and fleet intelligence platform, designed for African logistics operators.
 
-## MVP: AI Fleet Cost Optimizer
+## Product
 
-The first product focuses on identifying fleet cost leaks through fuel-efficiency analysis, mileage normalization, anomaly detection, and actionable recommendations.
+The MVP is an AI-first logistics Control Tower that turns operational data into prioritized decisions:
 
-### Product loop
+**Observe → Analyze → Detect → Explain → Recommend → Approve → Execute → Measure**
 
-**Observe → Analyze → Detect → Explain → Recommend → Measure**
+Core questions the platform is designed to answer:
 
-### Initial architecture
+1. How is my fleet performing?
+2. What is going wrong now?
+3. Which shipments are at risk?
+4. Where am I losing money?
+5. What should I do first?
 
-- `apps/web` — Next.js operations dashboard
-- `apps/api` — FastAPI backend
-- `ai` — anomaly detection, forecasting, and decision intelligence
-- `services` — fleet, fuel, routing, alerts, and forecasting domains
-- `packages` — shared contracts and database layer
-- `docs` — architecture and product documentation
+## Current capabilities
 
-## Development principles
+- Multi-tenant organization scoping with development RBAC.
+- Fleet health scoring from fuel, maintenance, and utilization signals.
+- Fuel anomaly and estimated excess-cost analysis with currency awareness.
+- Corridor risk and shipment risk scoring.
+- Explainable rule-based recommendations.
+- Recommendation action lifecycle: proposed → accepted → in_progress → completed.
+- Vehicle reassignment execution with capacity, active-status, and trip-lock validation.
+- Shipment rerouting through persisted route plans with one active route per shipment.
+- Control Tower overview metrics and alert lifecycle management.
+- Responsive browser dashboard for operational review and action execution.
+
+## Architecture
+
+- `apps/api` — FastAPI backend, PostgreSQL access, domain services, and REST API.
+- `apps/web` — Vite browser dashboard.
+- `ai` — AI and decision-intelligence foundations.
+- `services` — supporting domain/service foundations.
+- `docs` — architecture and product documentation.
+
+## Local development
+
+### Backend
+
+```bash
+cd apps/api
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
+
+### Frontend
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
+
+### PostgreSQL
+
+The canonical bootstrap schema is `apps/api/app/db/schema.sql`.
+
+Docker Compose is provided at the repository root:
+
+```bash
+docker compose up --build
+```
+
+The migration directory is present under `apps/api/migrations`. Migration execution should be treated as deployment infrastructure work; `001_initial.sql` currently establishes migration tracking rather than replacing the canonical bootstrap schema.
+
+## API workflow
+
+A typical operational decision flow is:
+
+1. Create an organization.
+2. Register vehicles and shipments.
+3. Ingest or record trips and fuel/maintenance events.
+4. Calculate fleet, corridor, and shipment risk.
+5. Generate explainable recommendations.
+6. Require an authorized operator to approve an executable recommendation.
+7. Execute vehicle reassignment or select and activate a route plan.
+8. Track the action through completion.
+
+## Roles
+
+| Role | Read | Approve / Execute |
+| --- | --- | --- |
+| `admin` | Yes | Yes |
+| `operations_manager` | Yes | Yes |
+| `fleet_manager` | Yes | Yes |
+| `analyst` | Yes | No |
+| `viewer` | Yes | No |
+
+The current tenant context uses development headers. It is **not production authentication** and must be replaced with a real OAuth2/OIDC or equivalent asymmetric-token identity layer before production deployment.
+
+## Engineering principles
 
 1. Build around measurable logistics ROI.
-2. Keep AI recommendations explainable and auditable.
+2. Keep recommendations explainable and auditable.
 3. Separate deterministic business rules from probabilistic AI.
-4. Require human approval before consequential operational actions in the MVP.
-5. Treat historical operational data and outcomes as a long-term product moat.
+4. Require human approval before consequential operational actions.
+5. Make operational state transitions explicit and transactional.
+6. Design for Kenya/East Africa first, with country, currency, and corridor configuration suitable for later Pan-African expansion.
 
-## Status
+## Validation status
 
-🚧 Early MVP — architecture and domain foundations.
+🚧 **v0.1 hardening phase.** The core decision loop and operational execution model are implemented. The remaining release gates are environment-level validation and production hardening, including:
+
+- Run the complete backend test suite in a real build environment.
+- Validate the PostgreSQL bootstrap/migration path against a clean and an existing database.
+- Execute an end-to-end shipment → risk → recommendation → approval → execution → completion scenario.
+- Replace development authentication with production identity management.
+- Add production monitoring, structured logging, and error tracking.
+- Expand country/currency/corridor configuration for African deployments.
+
+Do not treat this repository as production-ready until those gates are completed.
