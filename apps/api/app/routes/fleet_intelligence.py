@@ -22,33 +22,57 @@ def fleet_intelligence(
         with connection.cursor() as cursor:
             cursor.execute(
                 """
+                WITH fuel_metrics AS (
+                    SELECT
+                        v.id AS vehicle_id,
+                        COALESCE(SUM(ft.litres), 0) AS actual_fuel_litres,
+                        COALESCE(
+                            SUM((t.distance_km / 100.0) * v.expected_litres_per_100km),
+                            0
+                        ) AS expected_fuel_litres
+                    FROM vehicles v
+                    LEFT JOIN fuel_transactions ft
+                        ON ft.vehicle_id = v.id
+                        AND ft.organization_id = v.organization_id
+                    LEFT JOIN trips t
+                        ON t.id = ft.trip_id
+                        AND t.vehicle_id = v.id
+                        AND t.organization_id = v.organization_id
+                    WHERE v.organization_id = %s
+                    GROUP BY v.id
+                ),
+                maintenance_metrics AS (
+                    SELECT vehicle_id, COUNT(*) AS maintenance_events
+                    FROM maintenance_events
+                    WHERE organization_id = %s
+                    GROUP BY vehicle_id
+                ),
+                trip_metrics AS (
+                    SELECT
+                        vehicle_id,
+                        COUNT(*) AS trips,
+                        COUNT(*) FILTER (WHERE completed_at IS NULL) AS active_trips
+                    FROM trips
+                    WHERE organization_id = %s
+                    GROUP BY vehicle_id
+                )
                 SELECT
                     v.id,
                     v.registration_number,
                     v.odometer_km,
-                    v.expected_litres_per_100km,
-                    COALESCE(SUM(ft.litres), 0) AS actual_fuel_litres,
-                    COALESCE(SUM((t.distance_km / 100.0) * v.expected_litres_per_100km), 0)
-                        AS expected_fuel_litres,
-                    COUNT(DISTINCT me.id) AS maintenance_events,
-                    COUNT(DISTINCT t.id) AS trips,
-                    COUNT(DISTINCT CASE WHEN t.completed_at IS NULL THEN t.id END) AS active_trips
+                    COALESCE(fm.actual_fuel_litres, 0),
+                    COALESCE(fm.expected_fuel_litres, 0),
+                    COALESCE(mm.maintenance_events, 0),
+                    COALESCE(tm.trips, 0),
+                    COALESCE(tm.active_trips, 0)
                 FROM vehicles v
-                LEFT JOIN fuel_transactions ft
-                    ON ft.vehicle_id = v.id
-                    AND ft.organization_id = v.organization_id
-                LEFT JOIN trips t
-                    ON t.vehicle_id = v.id
-                    AND t.organization_id = v.organization_id
-                LEFT JOIN maintenance_events me
-                    ON me.vehicle_id = v.id
-                    AND me.organization_id = v.organization_id
+                LEFT JOIN fuel_metrics fm ON fm.vehicle_id = v.id
+                LEFT JOIN maintenance_metrics mm ON mm.vehicle_id = v.id
+                LEFT JOIN trip_metrics tm ON tm.vehicle_id = v.id
                 WHERE v.organization_id = %s
-                GROUP BY v.id, v.registration_number, v.odometer_km,
-                         v.expected_litres_per_100km
                 ORDER BY v.registration_number
                 """,
-                (organization_id,),
+                (organization_id, organization_id, organization_id, organization_id),
             )
             rows = cursor.fetchall()
 
@@ -57,7 +81,6 @@ def fleet_intelligence(
         vehicle_id,
         registration_number,
         odometer,
-        expected_litres_per_100km,
         actual_fuel_litres,
         expected_fuel_litres,
         maintenance_events,
