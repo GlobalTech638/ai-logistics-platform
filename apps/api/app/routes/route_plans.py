@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from app.auth.tenant import TenantContext, get_tenant_context
 from app.db.database import get_connection
+from app.services.route_plan_tracker import validate_transition
 
 router = APIRouter(prefix="/api/v1/route-plans", tags=["route-plans"])
 ACTION_ROLES = {"admin", "operations_manager", "fleet_manager"}
@@ -132,10 +133,13 @@ def update_route_plan_status(
             _, shipment_id, current_status = plan_row
             if current_status == "superseded":
                 raise HTTPException(status_code=409, detail="Superseded route plans are immutable")
-            if payload.status == "superseded":
-                raise HTTPException(status_code=409, detail="Use an active route plan to supersede it")
             if payload.status == current_status:
                 raise HTTPException(status_code=409, detail=f"Route plan is already {current_status}")
+
+            try:
+                validate_transition(current_status, payload.status)
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
 
             if payload.status == "active":
                 cursor.execute(
