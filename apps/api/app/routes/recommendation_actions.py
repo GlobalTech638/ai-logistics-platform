@@ -25,6 +25,7 @@ class RecommendationActionStatus(BaseModel):
     status: str = Field(pattern="^(accepted|in_progress|completed|rejected)$")
     notes: str | None = Field(default=None, max_length=2000)
     vehicle_id: UUID | None = None
+    route_plan_id: UUID | None = None
 
 
 def _require_action_role(tenant: TenantContext) -> None:
@@ -78,32 +79,53 @@ def _execute_reassignment(cursor, organization_id: UUID, shipment_id: UUID, vehi
     return f"Trip {trip_id} reassigned from vehicle {previous_vehicle_id} to {vehicle_id}"
 
 
-def _execute_reroute(cursor, organization_id: UUID, shipment_id: UUID, actor: str, reason: str | None) -> str:
+def _execute_reroute(
+    cursor,
+    organization_id: UUID,
+    shipment_id: UUID,
+    actor: str,
+    route_plan_id: UUID | None,
+    reason: str | None,
+) -> str:
+    if route_plan_id is None:
+        raise HTTPException(status_code=422, detail="route_plan_id is required to start a reroute_shipment action")
+
     cursor.execute(
         """
-        SELECT id, corridor, route_sequence
+        SELECT id, corridor, route_sequence, status
         FROM shipment_route_plans
-        WHERE organization_id = %s AND shipment_id = %s AND status = 'planned'
-        ORDER BY route_sequence DESC, created_at DESC
-        LIMIT 1
+        WHERE id = %s AND organization_id = %s AND shipment_id = %s
         FOR UPDATE
         """,
-        (organization_id, shipment_id),
+        (route_plan_id, organization_id, shipment_id),
     )
     route = cursor.fetchone()
     if not route:
-        raise HTTPException(status_code=409, detail="No planned route exists for shipment")
+        raise HTTPException(status_code=404, detail="Selected route plan not found for shipment")
 
-    route_id, corridor, route_sequence = route
+    route_id, corridor, route_sequence, status = route
+    if status != "planned":
+        raise HTTPException(status_code=409, detail="Selected route plan is not available for rerouting")
+
     cursor.execute(
         """
         UPDATE shipment_route_plans
-        SET status = 'rerouted', reroute_reason = %s, selected_by = %s, updated_at = now()
+        SET status = 'superseded', updated_at = now()
+        WHERE organization_id = %s AND shipment_id = %s
+          AND status = 'active' AND id <> %s
+        """,
+        (organization_id, shipment_id, route_id),
+    )
+
+    cursor.execute(
+        """
+        UPDATE shipment_route_plans
+        SET status = 'active', reroute_reason = %s, selected_by = %s, updated_at = now()
         WHERE id = %s AND organization_id = %s
         """,
         (reason or "AI recommendation accepted", actor, route_id, organization_id),
     )
-    return f"Route plan {route_id} on corridor {corridor} marked rerouted at sequence {route_sequence}"
+    return f"Route plan {route_id} on corridor {corridor} activated at sequence {route_sequence}"
 
 
 @router.post("/{organization_id}/shipments/{shipment_id}/actions")
@@ -186,7 +208,12 @@ def update_recommendation_action_status(
                 if shipment_id is None:
                     raise HTTPException(status_code=409, detail="Reroute action has no shipment")
                 execution_note = _execute_reroute(
-                    cursor, tenant.organization_id, shipment_id, tenant.user_id, rationale
+                    cursor,
+                    tenant.organization_id,
+                    shipment_id,
+                    tenant.user_id,
+                    payload.route_plan_id,
+                    rationale,
                 )
 
             notes = payload.notes if payload.notes is not None else current_notes
