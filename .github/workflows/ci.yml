@@ -9,9 +9,25 @@ on:
 jobs:
   api:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: logistics_test
+          POSTGRES_USER: logistics
+          POSTGRES_PASSWORD: logistics
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U logistics -d logistics_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: apps/api
+    env:
+      DATABASE_URL: postgresql://logistics:logistics@localhost:5432/logistics_test
 
     steps:
       - name: Checkout
