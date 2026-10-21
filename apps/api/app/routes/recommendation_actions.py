@@ -1,4 +1,3 @@
-import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -292,3 +291,42 @@ def list_recommendation_actions(
             columns = [item.name for item in cursor.description]
 
     return {"organization_id": str(organization_id), "actions": [dict(zip(columns, row)) for row in rows]}
+
+@router.get("/actions/{action_id}/events")
+def list_recommendation_action_events(
+    action_id: UUID,
+    tenant: TenantContext = Depends(get_tenant_context),
+) -> dict:
+    _require_action_role(tenant)
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, status, shipment_id
+                FROM recommendation_actions
+                WHERE id = %s AND organization_id = %s
+                """,
+                (action_id, tenant.organization_id),
+            )
+            action = cursor.fetchone()
+            if not action:
+                raise HTTPException(status_code=404, detail="Recommendation action not found")
+
+            cursor.execute(
+                """
+                SELECT id, from_status, to_status, actor_id, event_type, details, created_at
+                FROM recommendation_action_events
+                WHERE action_id = %s AND organization_id = %s
+                ORDER BY created_at ASC, id ASC
+                """,
+                (action_id, tenant.organization_id),
+            )
+            rows = cursor.fetchall()
+            columns = [item.name for item in cursor.description]
+
+    return {
+        "action_id": str(action_id),
+        "events": [dict(zip(columns, row)) for row in rows],
+    }
+
