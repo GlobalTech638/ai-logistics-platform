@@ -237,6 +237,30 @@ def update_recommendation_action_status(
             updated = cursor.fetchone()
             columns = [item.name for item in cursor.description]
 
+            # Persist the state transition in the same transaction as the
+            # operational mutation and action update. A failed audit insert
+            # must roll back the entire operation.
+            cursor.execute(
+                """
+                INSERT INTO recommendation_action_events (
+                    organization_id, action_id, from_status, to_status,
+                    actor_id, event_type, details
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    tenant.organization_id,
+                    action_id,
+                    current_status,
+                    payload.status,
+                    tenant.user_id,
+                    "operational_execution" if execution_note else "status_transition",
+                    __import__("json").dumps({
+                        "execution_note": execution_note,
+                        "vehicle_id": str(payload.vehicle_id) if payload.vehicle_id else None,
+                        "route_plan_id": str(payload.route_plan_id) if payload.route_plan_id else None,
+                    }),
+            )
+
     return dict(zip(columns, updated))
 
 
