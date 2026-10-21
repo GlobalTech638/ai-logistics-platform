@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 from uuid import UUID
 
-from fastapi import Header, HTTPException
+from fastapi import Depends, HTTPException
+
+from app.auth.security import AccessClaims, get_access_claims
 
 
 @dataclass(frozen=True)
@@ -11,21 +13,19 @@ class TenantContext:
     role: str
 
 
-def get_tenant_context(
-    x_organization_id: str = Header(...),
-    x_user_id: str = Header(...),
-    x_user_role: str = Header(...),
-) -> TenantContext:
-    allowed_roles = {"admin", "operations_manager", "fleet_manager", "analyst", "viewer"}
-    if x_user_role not in allowed_roles:
-        raise HTTPException(status_code=403, detail="Unsupported organization role")
+def get_tenant_context(claims: AccessClaims = Depends(get_access_claims)) -> TenantContext:
+    """Derive tenant identity and role only from a verified signed bearer token.
+
+    Client-supplied X-Organization-ID, X-User-ID, and X-User-Role headers are
+    deliberately not trusted for authorization.
+    """
     try:
-        organization_id = UUID(x_organization_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid organization ID") from exc
+        organization_id = UUID(claims.organization_id)
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise HTTPException(status_code=401, detail="Invalid organization claim") from exc
 
     return TenantContext(
         organization_id=organization_id,
-        user_id=x_user_id,
-        role=x_user_role,
+        user_id=claims.user_id,
+        role=claims.role,
     )
