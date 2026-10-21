@@ -22,7 +22,10 @@ def test_route_plan_migrations_are_rerunnable_and_enforce_invariants():
         conn.execute((API_ROOT / "app/db/schema.sql").read_text(), prepare=False)
         conn.execute("DROP TABLE IF EXISTS shipment_route_plans CASCADE")
 
-        conn.execute((API_ROOT / "migrations/002_route_plans.sql").read_text(), prepare=False)
+        migration_002 = (API_ROOT / "migrations/002_route_plans.sql").read_text()
+        conn.execute(migration_002, prepare=False)
+        conn.execute(migration_002, prepare=False)
+
         migration_003 = (API_ROOT / "migrations/003_route_plan_invariants.sql").read_text()
         conn.execute(migration_003, prepare=False)
         conn.execute(migration_003, prepare=False)
