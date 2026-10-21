@@ -11,6 +11,14 @@ TOKEN_TTL_MINUTES = int(os.getenv("ACCESS_TOKEN_TTL_MINUTES", "60"))
 _TOKEN_SECRET = os.getenv("ACCESS_TOKEN_SECRET", "development-only-change-me")
 _ALLOWED_ROLES = {"admin", "operations_manager", "fleet_manager", "analyst", "viewer"}
 
+if TOKEN_TTL_MINUTES < 1:
+    raise RuntimeError("ACCESS_TOKEN_TTL_MINUTES must be at least 1")
+if os.getenv("APP_ENV", "development").lower() == "production":
+    if _TOKEN_SECRET == "development-only-change-me" or len(_TOKEN_SECRET) < 32:
+        raise RuntimeError(
+            "Production requires ACCESS_TOKEN_SECRET to be a random secret of at least 32 characters"
+        )
+
 
 @dataclass(frozen=True)
 class AccessClaims:
