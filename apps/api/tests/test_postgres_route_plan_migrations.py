@@ -48,14 +48,15 @@ def test_route_plan_migrations_are_rerunnable_and_enforce_invariants():
             (organization_id, "MIGRATION-TEST-001", "Nairobi", "Mombasa", 2),
         ).fetchone()[0]
 
-        conn.execute(
+        active_plan_id = conn.execute(
             """
             INSERT INTO shipment_route_plans
                 (organization_id, shipment_id, corridor, status)
             VALUES (%s, %s, %s, 'active')
+            RETURNING id
             """,
             (organization_id, shipment_id, "Nairobi-Mombasa"),
-        )
+        ).fetchone()[0]
 
         with pytest.raises(errors.UniqueViolation):
             conn.execute(
@@ -76,3 +77,35 @@ def test_route_plan_migrations_are_rerunnable_and_enforce_invariants():
                 """,
                 (organization_id, shipment_id, "Invalid status"),
             )
+
+        # Database-level lifecycle enforcement must reject illegal transitions.
+        with pytest.raises(errors.CheckViolation):
+            conn.execute(
+                "UPDATE shipment_route_plans SET status = 'planned' WHERE id = %s",
+                (active_plan_id,),
+            )
+
+        # Active -> superseded is valid, but a superseded plan is immutable.
+        conn.execute(
+            "UPDATE shipment_route_plans SET status = 'superseded' WHERE id = %s",
+            (active_plan_id,),
+        )
+        with pytest.raises(errors.CheckViolation):
+            conn.execute(
+                "UPDATE shipment_route_plans SET corridor = 'Mutated corridor' WHERE id = %s",
+                (active_plan_id,),
+            )
+
+        planned_plan_id = conn.execute(
+            """
+            INSERT INTO shipment_route_plans
+                (organization_id, shipment_id, corridor, status)
+            VALUES (%s, %s, %s, 'planned')
+            RETURNING id
+            """,
+            (organization_id, shipment_id, "Alternative corridor"),
+        ).fetchone()[0]
+        conn.execute(
+            "UPDATE shipment_route_plans SET status = 'active' WHERE id = %s",
+            (planned_plan_id,),
+        )
