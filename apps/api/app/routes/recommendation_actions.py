@@ -1,3 +1,4 @@
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -254,7 +255,7 @@ def update_recommendation_action_status(
                     payload.status,
                     tenant.user_id,
                     "operational_execution" if execution_note else "status_transition",
-                    __import__("json").dumps({
+                    json.dumps({
                         "execution_note": execution_note,
                         "vehicle_id": str(payload.vehicle_id) if payload.vehicle_id else None,
                         "route_plan_id": str(payload.route_plan_id) if payload.route_plan_id else None,
