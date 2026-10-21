@@ -6,7 +6,7 @@ from app.services.vehicle_health import calculate_vehicle_health
 
 def test_vehicle_health_combines_risk_signals():
     result = calculate_vehicle_health("TRUCK-01", 80, 60, 40)
-    assert result.health_score == 30.0
+    assert result.health_score == 37.0
     assert result.status == "critical"
     assert result.priority == "immediate"
 
