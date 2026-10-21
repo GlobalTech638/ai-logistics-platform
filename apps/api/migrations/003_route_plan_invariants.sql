@@ -18,7 +18,7 @@ BEGIN
             ADD CONSTRAINT shipment_route_plans_status_check
             CHECK (status IN ('planned', 'active', 'superseded'));
     END IF;
-END
+END;
 $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_shipment_route_plans_one_active
