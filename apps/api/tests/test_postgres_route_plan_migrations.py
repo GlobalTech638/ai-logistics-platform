@@ -30,6 +30,10 @@ def test_route_plan_migrations_are_rerunnable_and_enforce_invariants():
         conn.execute(migration_003, prepare=False)
         conn.execute(migration_003, prepare=False)
 
+        migration_004 = (API_ROOT / "migrations/004_recommendation_action_events.sql").read_text()
+        conn.execute(migration_004, prepare=False)
+        conn.execute(migration_004, prepare=False)
+
         organization_id = conn.execute(
             """
             INSERT INTO organizations (name, country_code, default_currency)
