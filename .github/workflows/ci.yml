@@ -44,4 +44,5 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run tests
-        run: PYTHONPATH=. pytest -q
+        # API code lives in apps/api while a legacy service package lives at repo root.
+        run: PYTHONPATH=.:../.. pytest -q
