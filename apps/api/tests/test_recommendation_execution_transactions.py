@@ -106,8 +106,13 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
             assert cur.fetchone()[0] == "accepted"
             cur.execute("SELECT vehicle_id FROM trips WHERE id = %s", (trip_id,))
             assert cur.fetchone()[0] == old_vehicle_id
+            cur.execute(
+                "SELECT count(*) FROM recommendation_action_events WHERE action_id = %s",
+                (action_id,),
+            )
+            assert cur.fetchone()[0] == 0
 
-    # A valid execution commits the trip reassignment and action state together.
+    # A valid execution commits the trip reassignment, action state, and audit event together.
     succeeded = client.patch(
         url,
         json={"status": "in_progress", "vehicle_id": str(replacement_vehicle_id)},
@@ -122,3 +127,22 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
             assert cur.fetchone()[0] == replacement_vehicle_id
             cur.execute("SELECT status FROM recommendation_actions WHERE id = %s", (action_id,))
             assert cur.fetchone()[0] == "in_progress"
+            cur.execute(
+                """
+                SELECT from_status, to_status, actor_id, event_type, details
+                FROM recommendation_action_events
+                WHERE action_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (action_id,),
+            )
+            event = cur.fetchone()
+            assert event is not None
+            assert event[0:4] == (
+                "accepted",
+                "in_progress",
+                "integration-operator",
+                "operational_execution",
+            )
+            assert event[4]["vehicle_id"] == str(replacement_vehicle_id)
