@@ -146,3 +146,12 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
                 "operational_execution",
             )
             assert event[4]["vehicle_id"] == str(replacement_vehicle_id)
+
+    history = client.get(
+        f"/api/v1/recommendations/actions/{action_id}/events",
+        headers=headers,
+    )
+    assert history.status_code == 200, history.text
+    assert history.json()["action_id"] == str(action_id)
+    assert len(history.json()["events"]) == 1
+    assert history.json()["events"][0]["actor_id"] == "integration-operator"
