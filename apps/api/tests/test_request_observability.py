@@ -39,3 +39,18 @@ def test_request_completion_log_contains_correlation_and_duration(caplog):
     assert record.path == "/health"
     assert record.status_code == 200
     assert record.duration_ms >= 0
+
+
+
+def test_metrics_endpoint_exposes_low_cardinality_request_counters():
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    metrics_response = client.get("/metrics")
+
+    assert metrics_response.status_code == 200
+    body = metrics_response.text
+    assert "# TYPE logistics_http_requests_total counter" in body
+    assert 'logistics_http_requests_total{method="GET",route="/health",status_class="2xx"}' in body
+    assert "logistics_http_request_duration_seconds_sum" in body
+    assert 'route="/health"' in body
