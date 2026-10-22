@@ -1,8 +1,11 @@
+import hashlib
+import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
+from fastapi.encoders import jsonable_encoder
 
 from app.auth.tenant import TenantContext, get_tenant_context
 from app.db.database import get_connection
@@ -175,8 +178,12 @@ def update_recommendation_action_status(
     action_id: UUID,
     payload: RecommendationActionStatus,
     tenant: TenantContext = Depends(get_tenant_context),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", min_length=1, max_length=200),
 ) -> dict:
     _require_action_role(tenant)
+    request_hash = hashlib.sha256(
+        json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
     with get_connection() as connection:
         with connection.cursor() as cursor:
@@ -193,6 +200,26 @@ def update_recommendation_action_status(
                 raise HTTPException(status_code=404, detail="Recommendation action not found")
 
             current_status, shipment_id, recommendation_type, current_notes, rationale = row
+
+            if idempotency_key is not None:
+                cursor.execute(
+                    """
+                    SELECT request_hash, response_body
+                    FROM recommendation_action_idempotency
+                    WHERE organization_id = %s AND action_id = %s AND idempotency_key = %s
+                    """,
+                    (tenant.organization_id, action_id, idempotency_key),
+                )
+                cached = cursor.fetchone()
+                if cached:
+                    cached_hash, cached_response = cached
+                    if cached_hash != request_hash:
+                        raise HTTPException(
+                            status_code=409,
+                            detail="Idempotency-Key was already used with a different request",
+                        )
+                    return cached_response
+
             try:
                 validate_transition(current_status, payload.status)
             except ValueError as exc:
@@ -263,7 +290,24 @@ def update_recommendation_action_status(
                 ),
             )
 
-    return dict(zip(columns, updated))
+            response_body = jsonable_encoder(dict(zip(columns, updated)))
+            if idempotency_key is not None:
+                cursor.execute(
+                    """
+                    INSERT INTO recommendation_action_idempotency (
+                        organization_id, action_id, idempotency_key, request_hash, response_body
+                    ) VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (
+                        tenant.organization_id,
+                        action_id,
+                        idempotency_key,
+                        request_hash,
+                        Jsonb(response_body),
+                    ),
+                )
+
+    return response_body
 
 
 @router.get("/{organization_id}/actions")
