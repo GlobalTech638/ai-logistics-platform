@@ -61,3 +61,17 @@ Apply database migrations in order for an existing installation:
 4. `005_recommendation_action_idempotency.sql`
 
 The canonical bootstrap schema at `app/db/schema.sql` includes the current tables. Back up the database and test migrations against a staging copy before production rollout.
+
+## Request observability
+
+Every HTTP request receives an `X-Request-ID` response header. A caller-provided `X-Request-ID` is accepted only when it contains 1–128 ASCII letters, digits, dots, underscores, colons, or hyphens; otherwise the API generates a UUID. The ID is for correlation only and must never be treated as an authentication credential.
+
+The API emits structured log records named `http_request_completed` with the request ID, method, path, HTTP status, and duration in milliseconds. Unhandled exceptions emit `http_request_failed` with the same correlation fields and a stack trace. Configure the deployment's log collector to parse these fields and retain logs under the organization's security and privacy policy. Do not add bearer tokens, request bodies, or other secrets to request logs.
+
+Run the API observability tests with:
+
+```bash
+cd apps/api
+PYTHONPATH=.:../.. pytest -q tests/test_request_observability.py
+```
+
