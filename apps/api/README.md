@@ -36,3 +36,28 @@ curl -H "Authorization: Bearer <signed-token>" \
 ```
 
 The public health endpoint is intended for service health checks. Organization creation and token issuance should be exposed only through a separately designed, rate-limited onboarding and identity flow before public production launch.
+
+
+## Recommendation execution and idempotency
+
+Operational recommendation transitions that start a vehicle reassignment or shipment reroute must include an `Idempotency-Key` header. Use a new unpredictable or unique key for each logical request, and reuse the same key only when retrying that exact request.
+
+```bash
+curl -X PATCH \
+  -H "Authorization: Bearer <signed-token>" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: dispatch-change-<unique-request-id>" \
+  -d '{"status":"in_progress","vehicle_id":"<vehicle-uuid>"}' \
+  https://<api-host>/api/v1/recommendations/actions/<action-uuid>/status
+```
+
+For an identical retry, the API returns the stored response without applying the transition again. Reusing a key with a different request body returns HTTP 409. Operational execution without the header returns HTTP 428. The action transition, operational database mutation, audit event, and idempotency response are committed in the same PostgreSQL transaction.
+
+Apply database migrations in order for an existing installation:
+
+1. `002_route_plans.sql`
+2. `003_route_plan_invariants.sql`
+3. `004_recommendation_action_events.sql`
+4. `005_recommendation_action_idempotency.sql`
+
+The canonical bootstrap schema at `app/db/schema.sql` includes the current tables. Back up the database and test migrations against a staging copy before production rollout.
