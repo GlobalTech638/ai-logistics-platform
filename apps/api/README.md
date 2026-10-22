@@ -47,11 +47,11 @@ curl -X PATCH \
   -H "Authorization: Bearer <signed-token>" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: dispatch-change-<unique-request-id>" \
-  -d '{"status":"in_progress","vehicle_id":"<vehicle-uuid>"}' \
+  -d '{"status":"in_progress","vehicle_id":"<replacement-vehicle-uuid>","expected_vehicle_id":"<currently-assigned-vehicle-uuid>"}' \
   https://<api-host>/api/v1/recommendations/actions/<action-uuid>/status
 ```
 
-For an identical retry, the API returns the stored response without applying the transition again. Reusing a key with a different request body returns HTTP 409. Operational execution without the header returns HTTP 428. The action transition, operational database mutation, audit event, and idempotency response are committed in the same PostgreSQL transaction.
+For an identical retry, the API returns the stored response without applying the transition again. Reusing a key with a different request body returns HTTP 409. Operational execution without the header returns HTTP 428. Vehicle reassignment also requires `expected_vehicle_id`, the vehicle assignment the operator reviewed; a stale expected assignment returns HTTP 409 instead of overwriting a newer dispatch decision. The action transition, operational database mutation, audit event, and idempotency response are committed in the same PostgreSQL transaction.
 
 Apply database migrations in order for an existing installation:
 
