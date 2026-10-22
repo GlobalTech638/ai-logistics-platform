@@ -90,10 +90,17 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
     url = f"/api/v1/recommendations/actions/{action_id}/status"
 
     # A rejected execution must leave both the action and trip unchanged.
-    failed = client.patch(
+    missing_key = client.patch(
         url,
         json={"status": "in_progress", "vehicle_id": str(inactive_vehicle_id)},
         headers=headers,
+    )
+    assert missing_key.status_code == 428, missing_key.text
+
+    failed = client.patch(
+        url,
+        json={"status": "in_progress", "vehicle_id": str(inactive_vehicle_id)},
+        headers={**headers, "Idempotency-Key": "reassign-failure-001"},
     )
     assert failed.status_code == 409, failed.text
 
