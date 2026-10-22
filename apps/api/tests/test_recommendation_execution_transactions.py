@@ -195,3 +195,44 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
     assert history.json()["action_id"] == str(action_id)
     assert len(history.json()["events"]) == 1
     assert history.json()["events"][0]["actor_id"] == "integration-operator"
+
+    # A different action based on the old assignment must not overwrite a newer change.
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO recommendation_actions (
+                    organization_id, shipment_id, recommendation_type, status, acted_by
+                )
+                VALUES (%s, %s, 'reassign_vehicle', 'accepted', 'integration-operator')
+                RETURNING id
+                """,
+                (organization_id, shipment_id),
+            )
+            stale_action_id = cur.fetchone()[0]
+
+    stale_execution = client.patch(
+        f"/api/v1/recommendations/actions/{stale_action_id}/status",
+        json={
+            "status": "in_progress",
+            "vehicle_id": str(old_vehicle_id),
+            "expected_vehicle_id": str(old_vehicle_id),
+        },
+        headers={**headers, "Idempotency-Key": "reassign-stale-001"},
+    )
+    assert stale_execution.status_code == 409, stale_execution.text
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT vehicle_id FROM trips WHERE id = %s", (trip_id,))
+            assert cur.fetchone()[0] == replacement_vehicle_id
+            cur.execute(
+                "SELECT status FROM recommendation_actions WHERE id = %s",
+                (stale_action_id,),
+            )
+            assert cur.fetchone()[0] == "accepted"
+            cur.execute(
+                "SELECT count(*) FROM recommendation_action_events WHERE action_id = %s",
+                (stale_action_id,),
+            )
+            assert cur.fetchone()[0] == 0
