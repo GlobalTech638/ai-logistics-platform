@@ -59,6 +59,7 @@ def _execute_reassignment(
         FROM shipments s CROSS JOIN vehicles v
         WHERE s.id = %s AND s.organization_id = %s
           AND v.id = %s AND v.organization_id = %s
+        FOR UPDATE OF v
         """,
         (shipment_id, organization_id, vehicle_id, organization_id),
     )
