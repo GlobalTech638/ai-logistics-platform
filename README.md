@@ -114,3 +114,12 @@ The current tenant context uses development headers. It is **not production auth
 - Expand country/currency/corridor configuration for African deployments.
 
 Do not treat this repository as production-ready until those gates are completed.
+
+### HTTP observability and metrics
+
+- `GET /health` is a liveness probe and does not require PostgreSQL.
+- `GET /ready` is a readiness probe and returns `503` when the database check fails.
+- Every response includes an `X-Request-ID`; a valid caller-supplied ID is preserved, otherwise the API generates one. Completion logs include request ID, method, route path, status code, and duration.
+- `GET /metrics` exposes Prometheus text-format request counters and duration sums/counts by HTTP method, route template, and status class. Route templates are used rather than raw URL paths to avoid shipment/action IDs creating unbounded metric cardinality.
+
+**Deployment note:** these metrics are process-local. With multiple workers or replicas, scrape each process where possible or aggregate in a monitoring layer; do not interpret one process's counters as fleet-wide totals. Restrict the metrics endpoint to trusted monitoring infrastructure at the ingress/network layer.
