@@ -5,7 +5,7 @@ from threading import Lock
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.db.database import get_connection
 
@@ -91,7 +91,7 @@ async def request_observability(request: Request, call_next):
 
 
 @app.get("/metrics", tags=["system"], include_in_schema=False)
-def metrics() -> str:
+def metrics() -> PlainTextResponse:
     """Expose low-cardinality Prometheus metrics for this API process."""
     with _metrics_lock:
         snapshot = [(key, values.copy()) for key, values in _request_metrics.items()]
@@ -116,7 +116,7 @@ def metrics() -> str:
     for (method, route, status_class), values in sorted(snapshot):
         labels = 'method="' + method + '",route="' + route + '",status_class="' + status_class + '"'
         lines.append('logistics_http_request_duration_seconds_count{' + labels + '} ' + str(int(values["count"])))
-    return "\n".join(lines) + "\n"
+    return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
 @app.get("/health", tags=["system"])
