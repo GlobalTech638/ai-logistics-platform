@@ -37,6 +37,8 @@ curl -H "Authorization: Bearer <signed-token>" \
 
 The public health endpoint is intended for service health checks. Organization creation and token issuance should be exposed only through a separately designed, rate-limited onboarding and identity flow before public production launch.
 
+Organization creation is fail-closed unless `ORGANIZATION_PROVISIONING_TOKEN` is configured. A trusted provisioning caller must send it in the `X-Organization-Provisioning-Token` header. Keep this credential in a secret manager, restrict the route at the ingress/network layer, rotate the credential if exposed, and do not place it in browser code. This shared-secret gate is a bootstrap control, not a substitute for a complete, rate-limited onboarding and identity workflow.
+
 
 ## Recommendation execution and idempotency
 
