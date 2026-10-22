@@ -38,8 +38,12 @@ def issue_access_token(user_id: str, organization_id: str, role: str) -> str:
     Do not expose this helper as an unauthenticated public endpoint. Production
     deployments must set ACCESS_TOKEN_SECRET to a strong, randomly generated value.
     """
-    if not user_id.strip():
+    if not isinstance(user_id, str) or not user_id.strip():
         raise ValueError("user_id is required")
+    if len(user_id) > 128 or ":" in user_id:
+        raise ValueError("user_id must be at most 128 characters and cannot contain ':'")
+    if not isinstance(organization_id, str) or not organization_id.strip() or ":" in organization_id:
+        raise ValueError("organization_id is required and cannot contain ':'")
     if role not in _ALLOWED_ROLES:
         raise ValueError("Unsupported organization role")
     expires = datetime.now(timezone.utc) + timedelta(minutes=TOKEN_TTL_MINUTES)
@@ -64,7 +68,14 @@ def get_access_claims(authorization: str = Header(...)) -> AccessClaims:
         raise HTTPException(status_code=401, detail="Invalid access token")
     if expires_at <= datetime.now(timezone.utc):
         raise HTTPException(status_code=401, detail="Access token expired")
-    if not user_id.strip() or role not in _ALLOWED_ROLES:
+    if (
+        not user_id.strip()
+        or len(user_id) > 128
+        or ":" in user_id
+        or not organization_id.strip()
+        or ":" in organization_id
+        or role not in _ALLOWED_ROLES
+    ):
         raise HTTPException(status_code=401, detail="Invalid access token claims")
 
     return AccessClaims(user_id, organization_id, role, expires_at)
