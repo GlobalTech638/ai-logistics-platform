@@ -64,3 +64,24 @@ def test_invalid_organization_claim_is_rejected():
         get_tenant_context(claims)
 
     assert error.value.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "user_id,organization_id",
+    [
+        ("operator:admin", "a8d0b7be-7e6c-4d29-83d7-63ad0d0b0c21"),
+        ("operator-7", "org:admin"),
+        ("operator-7", ""),
+        ("", "a8d0b7be-7e6c-4d29-83d7-63ad0d0b0c21"),
+    ],
+)
+def test_token_issuance_rejects_empty_or_delimiter_bearing_identity(user_id, organization_id):
+    with pytest.raises(ValueError):
+        security.issue_access_token(user_id, organization_id, "viewer")
+
+
+def test_token_issuance_rejects_overlong_user_id():
+    with pytest.raises(ValueError, match="128 characters"):
+        security.issue_access_token(
+            "u" * 129, "a8d0b7be-7e6c-4d29-83d7-63ad0d0b0c21", "viewer"
+        )
