@@ -4,6 +4,9 @@ import time
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+
+from app.db.database import get_connection
 
 from app.routes import fleet_router
 from app.routes.analytics import router as analytics_router
@@ -77,6 +80,24 @@ async def request_observability(request: Request, call_next):
 @app.get("/health", tags=["system"])
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "logistics-api", "version": app.version}
+
+
+@app.get("/ready", tags=["system"])
+def readiness():
+    """Report whether the API can reach its required PostgreSQL database."""
+    try:
+        with get_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+    except Exception:
+        logger.exception("readiness_check_failed")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "dependency": "database"},
+        )
+
+    return {"status": "ready", "database": "ok"}
 
 
 @app.get("/")
