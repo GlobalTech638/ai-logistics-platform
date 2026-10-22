@@ -1,6 +1,8 @@
+import hmac
+import os
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from app.auth.tenant import TenantContext, get_tenant_context
@@ -16,7 +18,15 @@ class OrganizationCreate(BaseModel):
 
 
 @router.post("")
-def create_organization(payload: OrganizationCreate) -> dict:
+def create_organization(
+    payload: OrganizationCreate,
+    provisioning_token: str | None = Header(default=None, alias="X-Organization-Provisioning-Token"),
+) -> dict:
+    """Create an organization only through a separately configured trusted provisioning flow."""
+    expected_token = os.getenv("ORGANIZATION_PROVISIONING_TOKEN", "")
+    if not expected_token or not provisioning_token or not hmac.compare_digest(provisioning_token, expected_token):
+        raise HTTPException(status_code=403, detail="Organization provisioning is not authorized")
+
     country = payload.country_code.upper()
     currency = payload.default_currency.upper()
     query = """
