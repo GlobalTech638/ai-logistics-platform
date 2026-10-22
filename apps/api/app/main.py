@@ -1,6 +1,7 @@
 import logging
 import re
 import time
+from threading import Lock
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
@@ -22,6 +23,10 @@ from app.routes.route_plans import router as route_plans_router
 
 logger = logging.getLogger("logistics_api.http")
 REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+# Process-local metrics; aggregate across workers in external monitoring.
+_metrics_lock = Lock()
+_request_metrics: dict[tuple[str, str, str], dict[str, float]] = {}
 
 app = FastAPI(
     title="Pan-African Logistics AI Platform",
@@ -65,6 +70,14 @@ async def request_observability(request: Request, call_next):
         )
         raise
     finally:
+        duration_seconds = time.perf_counter() - started
+        route = request.scope.get("route")
+        route_template = getattr(route, "path", None) or "unmatched"
+        metric_key = (request.method, route_template, f"{status_code // 100}xx")
+        with _metrics_lock:
+            metric = _request_metrics.setdefault(metric_key, {"count": 0.0, "duration_seconds": 0.0})
+            metric["count"] += 1
+            metric["duration_seconds"] += duration_seconds
         logger.info(
             "http_request_completed",
             extra={
@@ -72,9 +85,38 @@ async def request_observability(request: Request, call_next):
                 "method": request.method,
                 "path": request.url.path,
                 "status_code": status_code,
-                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                "duration_ms": round(duration_seconds * 1000, 2),
             },
         )
+
+
+@app.get("/metrics", tags=["system"], include_in_schema=False)
+def metrics() -> str:
+    """Expose low-cardinality Prometheus metrics for this API process."""
+    with _metrics_lock:
+        snapshot = [(key, values.copy()) for key, values in _request_metrics.items()]
+    lines = [
+        "# HELP logistics_http_requests_total Completed HTTP requests by method, route template, and status class.",
+        "# TYPE logistics_http_requests_total counter",
+    ]
+    for (method, route, status_class), values in sorted(snapshot):
+        labels = 'method="' + method + '",route="' + route + '",status_class="' + status_class + '"'
+        lines.append('logistics_http_requests_total{' + labels + '} ' + str(int(values["count"])))
+    lines.extend([
+        "# HELP logistics_http_request_duration_seconds_sum Total observed HTTP request duration in seconds.",
+        "# TYPE logistics_http_request_duration_seconds_sum counter",
+    ])
+    for (method, route, status_class), values in sorted(snapshot):
+        labels = 'method="' + method + '",route="' + route + '",status_class="' + status_class + '"'
+        lines.append('logistics_http_request_duration_seconds_sum{' + labels + '} ' + format(values["duration_seconds"], ".6f"))
+    lines.extend([
+        "# HELP logistics_http_request_duration_seconds_count Number of HTTP request duration observations.",
+        "# TYPE logistics_http_request_duration_seconds_count counter",
+    ])
+    for (method, route, status_class), values in sorted(snapshot):
+        labels = 'method="' + method + '",route="' + route + '",status_class="' + status_class + '"'
+        lines.append('logistics_http_request_duration_seconds_count{' + labels + '} ' + str(int(values["count"])))
+    return "\n".join(lines) + "\n"
 
 
 @app.get("/health", tags=["system"])
