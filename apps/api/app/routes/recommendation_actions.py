@@ -29,6 +29,7 @@ class RecommendationActionStatus(BaseModel):
     status: str = Field(pattern="^(accepted|in_progress|completed|rejected)$")
     notes: str | None = Field(default=None, max_length=2000)
     vehicle_id: UUID | None = None
+    expected_vehicle_id: UUID | None = None
     route_plan_id: UUID | None = None
 
 
@@ -37,9 +38,20 @@ def _require_action_role(tenant: TenantContext) -> None:
         raise HTTPException(status_code=403, detail="Role is not authorized to execute recommendations")
 
 
-def _execute_reassignment(cursor, organization_id: UUID, shipment_id: UUID, vehicle_id: UUID | None) -> str:
+def _execute_reassignment(
+    cursor,
+    organization_id: UUID,
+    shipment_id: UUID,
+    vehicle_id: UUID | None,
+    expected_vehicle_id: UUID | None,
+) -> str:
     if vehicle_id is None:
         raise HTTPException(status_code=422, detail="vehicle_id is required to start a reassign_vehicle action")
+    if expected_vehicle_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="expected_vehicle_id is required to prevent stale vehicle reassignment",
+        )
 
     cursor.execute(
         """
@@ -73,6 +85,11 @@ def _execute_reassignment(cursor, organization_id: UUID, shipment_id: UUID, vehi
         raise HTTPException(status_code=409, detail="No active trip assignment found for shipment")
 
     trip_id, previous_vehicle_id = trip
+    if previous_vehicle_id != expected_vehicle_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Shipment vehicle assignment changed; refresh the shipment before retrying",
+        )
     if previous_vehicle_id == vehicle_id:
         return f"Trip {trip_id} already assigned to vehicle {vehicle_id}"
 
@@ -240,7 +257,11 @@ def update_recommendation_action_status(
                 if shipment_id is None:
                     raise HTTPException(status_code=409, detail="Reassignment action has no shipment")
                 execution_note = _execute_reassignment(
-                    cursor, tenant.organization_id, shipment_id, payload.vehicle_id
+                    cursor,
+                    tenant.organization_id,
+                    shipment_id,
+                    payload.vehicle_id,
+                    payload.expected_vehicle_id,
                 )
             elif payload.status == "in_progress" and recommendation_type == "reroute_shipment":
                 if shipment_id is None:
@@ -295,6 +316,7 @@ def update_recommendation_action_status(
                     Jsonb({
                         "execution_note": execution_note,
                         "vehicle_id": str(payload.vehicle_id) if payload.vehicle_id else None,
+                        "expected_vehicle_id": str(payload.expected_vehicle_id) if payload.expected_vehicle_id else None,
                         "route_plan_id": str(payload.route_plan_id) if payload.route_plan_id else None,
                     }),
                 ),
