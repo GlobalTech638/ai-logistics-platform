@@ -201,6 +201,16 @@ def update_recommendation_action_status(
 
             current_status, shipment_id, recommendation_type, current_notes, rationale = row
 
+            if (
+                payload.status == "in_progress"
+                and recommendation_type in {"reassign_vehicle", "reroute_shipment"}
+                and idempotency_key is None
+            ):
+                raise HTTPException(
+                    status_code=428,
+                    detail="Idempotency-Key is required for operational execution requests",
+                )
+
             if idempotency_key is not None:
                 cursor.execute(
                     """
