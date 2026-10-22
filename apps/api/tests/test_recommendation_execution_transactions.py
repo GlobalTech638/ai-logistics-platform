@@ -113,13 +113,24 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
             assert cur.fetchone()[0] == 0
 
     # A valid execution commits the trip reassignment, action state, and audit event together.
-    succeeded = client.patch(
-        url,
-        json={"status": "in_progress", "vehicle_id": str(replacement_vehicle_id)},
-        headers=headers,
-    )
+    idempotency_headers = {**headers, "Idempotency-Key": "reassign-integration-001"}
+    request_body = {"status": "in_progress", "vehicle_id": str(replacement_vehicle_id)}
+    succeeded = client.patch(url, json=request_body, headers=idempotency_headers)
     assert succeeded.status_code == 200, succeeded.text
     assert succeeded.json()["status"] == "in_progress"
+
+    # Retrying the exact request returns the stored response without a second transition.
+    replayed = client.patch(url, json=request_body, headers=idempotency_headers)
+    assert replayed.status_code == 200, replayed.text
+    assert replayed.json() == succeeded.json()
+
+    # A key cannot be reused for a different payload.
+    conflicting_replay = client.patch(
+        url,
+        json={"status": "in_progress", "vehicle_id": str(old_vehicle_id)},
+        headers=idempotency_headers,
+    )
+    assert conflicting_replay.status_code == 409
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -127,6 +138,16 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
             assert cur.fetchone()[0] == replacement_vehicle_id
             cur.execute("SELECT status FROM recommendation_actions WHERE id = %s", (action_id,))
             assert cur.fetchone()[0] == "in_progress"
+            cur.execute(
+                "SELECT count(*) FROM recommendation_action_events WHERE action_id = %s",
+                (action_id,),
+            )
+            assert cur.fetchone()[0] == 1
+            cur.execute(
+                "SELECT count(*) FROM recommendation_action_idempotency WHERE action_id = %s",
+                (action_id,),
+            )
+            assert cur.fetchone()[0] == 1
             cur.execute(
                 """
                 SELECT from_status, to_status, actor_id, event_type, details
