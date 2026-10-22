@@ -75,3 +75,10 @@ cd apps/api
 PYTHONPATH=.:../.. pytest -q tests/test_request_observability.py
 ```
 
+## Liveness and readiness probes
+
+- `GET /health` is a liveness endpoint. It confirms the API process can respond and deliberately does not depend on PostgreSQL.
+- `GET /ready` is a readiness endpoint. It executes `SELECT 1` against PostgreSQL and returns HTTP 200 only when the database is reachable; dependency failures return HTTP 503.
+
+Configure container orchestration or the load balancer to use `/health` for liveness and `/ready` for readiness. Do not use a database-dependent readiness probe as the liveness probe, because a temporary database outage could otherwise trigger unnecessary API restarts.
+
