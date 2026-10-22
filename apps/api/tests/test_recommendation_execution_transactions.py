@@ -99,7 +99,11 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
 
     failed = client.patch(
         url,
-        json={"status": "in_progress", "vehicle_id": str(inactive_vehicle_id)},
+        json={
+            "status": "in_progress",
+            "vehicle_id": str(inactive_vehicle_id),
+            "expected_vehicle_id": str(old_vehicle_id),
+        },
         headers={**headers, "Idempotency-Key": "reassign-failure-001"},
     )
     assert failed.status_code == 409, failed.text
@@ -121,7 +125,11 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
 
     # A valid execution commits the trip reassignment, action state, and audit event together.
     idempotency_headers = {**headers, "Idempotency-Key": "reassign-integration-001"}
-    request_body = {"status": "in_progress", "vehicle_id": str(replacement_vehicle_id)}
+    request_body = {
+        "status": "in_progress",
+        "vehicle_id": str(replacement_vehicle_id),
+        "expected_vehicle_id": str(old_vehicle_id),
+    }
     succeeded = client.patch(url, json=request_body, headers=idempotency_headers)
     assert succeeded.status_code == 200, succeeded.text
     assert succeeded.json()["status"] == "in_progress"
@@ -134,7 +142,11 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
     # A key cannot be reused for a different payload.
     conflicting_replay = client.patch(
         url,
-        json={"status": "in_progress", "vehicle_id": str(old_vehicle_id)},
+        json={
+            "status": "in_progress",
+            "vehicle_id": str(old_vehicle_id),
+            "expected_vehicle_id": str(old_vehicle_id),
+        },
         headers=idempotency_headers,
     )
     assert conflicting_replay.status_code == 409
