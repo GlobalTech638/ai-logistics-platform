@@ -103,6 +103,12 @@ def test_route_plan_migrations_are_rerunnable_and_enforce_invariants():
                 (other_organization_id, shipment_id),
             )
 
+        with pytest.raises(errors.CheckViolation):
+            conn.execute(
+                "UPDATE vehicles SET organization_id = %s WHERE id = %s",
+                (other_organization_id, other_vehicle_id),
+            )
+
         active_plan_id = conn.execute(
             """
             INSERT INTO shipment_route_plans
