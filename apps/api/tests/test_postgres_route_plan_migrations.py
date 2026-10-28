@@ -38,6 +38,10 @@ def test_route_plan_migrations_are_rerunnable_and_enforce_invariants():
         conn.execute(migration_005, prepare=False)
         conn.execute(migration_005, prepare=False)
 
+        migration_006 = (API_ROOT / "migrations/006_tenant_relationship_integrity.sql").read_text()
+        conn.execute(migration_006, prepare=False)
+        conn.execute(migration_006, prepare=False)
+
         organization_id = conn.execute(
             """
             INSERT INTO organizations (name, country_code, default_currency)
@@ -55,6 +59,49 @@ def test_route_plan_migrations_are_rerunnable_and_enforce_invariants():
             """,
             (organization_id, "MIGRATION-TEST-001", "Nairobi", "Mombasa", 2),
         ).fetchone()[0]
+
+        other_organization_id = conn.execute(
+            """
+            INSERT INTO organizations (name, country_code, default_currency)
+            VALUES ('Other tenant migration test', 'KE', 'KES')
+            RETURNING id
+            """
+        ).fetchone()[0]
+        other_vehicle_id = conn.execute(
+            """
+            INSERT INTO vehicles (
+                organization_id, registration_number, make, model,
+                expected_litres_per_100km, capacity_tonnes
+            )
+            VALUES (%s, 'OTHER-TENANT-001', 'TestMake', 'TestModel', 20, 10)
+            RETURNING id
+            """,
+            (other_organization_id,),
+        ).fetchone()[0]
+
+        # Existing foreign keys only verify that related rows exist; migration
+        # 006 additionally requires every related row to share the tenant.
+        with pytest.raises(errors.ForeignKeyViolation):
+            conn.execute(
+                """
+                INSERT INTO trips (
+                    organization_id, vehicle_id, shipment_id, origin, destination,
+                    distance_km, planned_duration_minutes, actual_duration_minutes, load_tonnes
+                )
+                VALUES (%s, %s, %s, 'Nairobi', 'Mombasa', 480, 480, 500, 2)
+                """,
+                (organization_id, other_vehicle_id, shipment_id),
+            )
+
+        with pytest.raises(errors.ForeignKeyViolation):
+            conn.execute(
+                """
+                INSERT INTO shipment_route_plans
+                    (organization_id, shipment_id, corridor, status)
+                VALUES (%s, %s, 'Cross-tenant route', 'planned')
+                """,
+                (other_organization_id, shipment_id),
+            )
 
         active_plan_id = conn.execute(
             """
