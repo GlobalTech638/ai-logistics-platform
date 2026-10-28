@@ -63,7 +63,7 @@ Apply database migrations in order for an existing installation:
 4. `005_recommendation_action_idempotency.sql`
 5. `006_tenant_relationship_integrity.sql`
 
-Migration 006 adds database triggers that reject cross-organization relationships between trips, vehicles, and shipments; fuel transactions and their vehicles/trips; maintenance events and vehicles; alerts and their referenced records; recommendation actions and shipments; action events/idempotency records and their actions; and route plans and shipments. This protects data integrity even when writes bypass the API. Before production rollout, check existing data for cross-tenant relationships and repair any violations, then apply migrations in staging first.
+Migration 006 adds database triggers that reject cross-organization relationships between trips, vehicles, and shipments; fuel transactions and their vehicles/trips; maintenance events and vehicles; alerts and their referenced records; recommendation actions and shipments; action events/idempotency records and their actions; and route plans and shipments. It also makes tenant ownership immutable after row creation so moving a parent record cannot invalidate existing relationships. This protects data integrity even when writes bypass the API. Before production rollout, check existing data for cross-tenant relationships and repair any violations, then apply migrations in staging first.
 
 The canonical bootstrap schema at `app/db/schema.sql` includes the current tables, but existing installations must apply migrations in order. Back up the database and test migrations against a staging copy before production rollout.
 
