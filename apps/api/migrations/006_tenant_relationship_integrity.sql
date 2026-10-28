@@ -147,7 +147,7 @@ FOR EACH ROW EXECUTE FUNCTION enforce_same_organization_relationships();
 CREATE OR REPLACE FUNCTION prevent_tenant_ownership_change()
 RETURNS trigger
 LANGUAGE plpgsql
-AS $
+AS $tenant_guard$
 BEGIN
     IF NEW.organization_id IS DISTINCT FROM OLD.organization_id THEN
         RAISE EXCEPTION 'Tenant ownership cannot be changed after creation'
@@ -155,7 +155,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
-$;
+$tenant_guard$;
 
 DROP TRIGGER IF EXISTS trg_vehicles_tenant_immutable ON vehicles;
 CREATE TRIGGER trg_vehicles_tenant_immutable
