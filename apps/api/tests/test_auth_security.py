@@ -215,3 +215,17 @@ def test_production_requires_complete_oidc_configuration(monkeypatch):
 
     with pytest.raises(RuntimeError, match="OIDC_JWKS_URL"):
         security._production_oidc_config()
+
+
+def test_production_rejects_non_https_or_hostless_oidc_endpoints(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("OIDC_JWKS_URL", "http://identity.example.com/jwks")
+    monkeypatch.setenv("OIDC_ISSUER", "https://identity.example.com/")
+    monkeypatch.setenv("OIDC_AUDIENCE", "logistics-api")
+
+    with pytest.raises(RuntimeError, match="valid HTTPS URLs"):
+        security._production_oidc_config()
+
+    monkeypatch.setenv("OIDC_JWKS_URL", "https:///jwks")
+    with pytest.raises(RuntimeError, match="valid HTTPS URLs"):
+        security._production_oidc_config()
