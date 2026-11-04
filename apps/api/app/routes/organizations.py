@@ -118,6 +118,12 @@ def add_organization_member(
     with get_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
+                "SELECT id FROM organizations WHERE id = %s FOR UPDATE",
+                (organization_id,),
+            )
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="Organization not found")
+            cursor.execute(
                 """
                 INSERT INTO organization_memberships (organization_id, user_subject, role)
                 VALUES (%s, %s, %s)
