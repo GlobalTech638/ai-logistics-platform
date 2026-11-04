@@ -56,7 +56,7 @@ function recommendationCard(shipment, recommendation) {
       : `${reassign ? `<select class="vehicle-select" aria-label="Replacement vehicle"><option value="">Select replacement vehicle</option>${vehicleOptions}</select>` : ""}<button class="action-button" data-action="accept">Accept recommendation</button>`;
 
   return `
-    <article class="recommendation" data-shipment-id="${escapeHtml(shipment.shipment_id)}" data-recommendation-type="${escapeHtml(recommendation.recommendation_type)}">
+    <article class="recommendation" data-shipment-id="${escapeHtml(shipment.shipment_id)}" data-recommendation-type="${escapeHtml(recommendation.recommendation_type)}" data-current-vehicle-id="${escapeHtml(shipment.current_vehicle_id || "")}">
       <div class="recommendation-top">
         <div>
           <span class="priority priority-${escapeHtml(recommendation.priority)}">${escapeHtml(recommendation.priority)}</span>
@@ -95,6 +95,11 @@ async function handleAccept(event) {
   const routePlanSelect = card.querySelector(".route-plan-select");
   const button = event.currentTarget;
 
+  if (recommendationType === "reassign_vehicle" && !card.dataset.currentVehicleId) {
+    status.textContent = "Cannot reassign this shipment because it has no active vehicle assignment.";
+    return;
+  }
+
   if (["reassign_vehicle", "reroute_shipment"].includes(recommendationType)) {
     const selected = vehicleSelect?.value || routePlanSelect?.value;
     if (!selected) {
@@ -132,7 +137,11 @@ async function handleAccept(event) {
     if (!acceptedResponse.ok) throw new Error(`Could not accept action (${acceptedResponse.status})`);
 
     if (recommendationType === "reassign_vehicle") {
-      await executeAction(action.id, { status: "in_progress", vehicle_id: vehicleSelect.value });
+      await executeAction(action.id, {
+        status: "in_progress",
+        vehicle_id: vehicleSelect.value,
+        expected_vehicle_id: card.dataset.currentVehicleId,
+      });
       status.textContent = "Accepted and executed. Vehicle reassignment recorded.";
     } else if (recommendationType === "reroute_shipment") {
       await executeAction(action.id, { status: "in_progress", route_plan_id: routePlanSelect.value });
@@ -151,7 +160,7 @@ async function handleAccept(event) {
 async function executeAction(actionId, payload) {
   const response = await fetch(`${API}/api/v1/recommendations/actions/${actionId}/status`, {
     method: "PATCH",
-    headers: headers(),
+    headers: { ...headers(), "Idempotency-Key": crypto.randomUUID() },
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
@@ -188,7 +197,9 @@ async function loadActions() {
       const executable = CAN_EXECUTE && action.status === "accepted" && ["reassign_vehicle", "reroute_shipment"].includes(action.recommendation_type);
       const control = executable
         ? action.recommendation_type === "reassign_vehicle"
-          ? `<select class="log-vehicle-select" data-action-id="${escapeHtml(action.id)}" aria-label="Replacement vehicle"><option value="">Select vehicle</option>${vehicles.filter((vehicle) => vehicle.active).map((vehicle) => `<option value="${escapeHtml(vehicle.id)}">${escapeHtml(vehicle.registration_number)}</option>`).join("")}</select><button class="action-button log-execute" data-action-id="${escapeHtml(action.id)}">Execute</button>`
+          ? (action.expected_vehicle_id
+            ? `<select class="log-vehicle-select" data-action-id="${escapeHtml(action.id)}" aria-label="Replacement vehicle"><option value="">Select vehicle</option>${vehicles.filter((vehicle) => vehicle.active).map((vehicle) => `<option value="${escapeHtml(vehicle.id)}">${escapeHtml(vehicle.registration_number)}</option>`).join("")}</select><button class="action-button log-execute" data-action-id="${escapeHtml(action.id)}" data-expected-vehicle-id="${escapeHtml(action.expected_vehicle_id)}">Execute</button>`
+            : `<small class="permission-note">No active vehicle assignment available.</small>`)
           : `<select class="log-route-select" data-action-id="${escapeHtml(action.id)}" data-shipment-id="${escapeHtml(action.shipment_id || "")}" aria-label="Route plan"><option value="">Select route plan</option>${(routePlansByShipment.get(action.shipment_id) || []).filter((plan) => plan.status === "planned").map((plan) => `<option value="${escapeHtml(plan.id)}">${escapeHtml(plan.corridor)} · ${escapeHtml(plan.route_sequence)}</option>`).join("")}</select><button class="action-button log-execute" data-action-id="${escapeHtml(action.id)}">Execute</button>`
         : "";
       return `<div class="action-row"><div><strong>${escapeHtml(action.title || action.recommendation_type)}</strong><small>${escapeHtml(action.recommendation_type)} · ${escapeHtml(action.shipment_id || "No shipment")}</small></div><div class="action-row-controls">${control}<span class="action-status status-${escapeHtml(action.status)}">${escapeHtml(action.status.replaceAll("_", " "))}</span></div></div>`;
@@ -207,7 +218,10 @@ async function handleLogExecute(event) {
   const vehicleSelect = row.querySelector(".log-vehicle-select");
   const payload = { status: "in_progress" };
   if (routeSelect) payload.route_plan_id = routeSelect.value;
-  if (vehicleSelect) payload.vehicle_id = vehicleSelect.value;
+  if (vehicleSelect) {
+    payload.vehicle_id = vehicleSelect.value;
+    payload.expected_vehicle_id = button.dataset.expectedVehicleId;
+  }
   if (!payload.route_plan_id && !payload.vehicle_id) return;
   button.disabled = true;
   try {
