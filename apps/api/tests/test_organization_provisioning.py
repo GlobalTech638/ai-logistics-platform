@@ -36,7 +36,7 @@ def test_organization_creation_rejects_wrong_provisioning_token(monkeypatch):
     response = client.post(
         "/api/v1/organizations",
         headers={"X-Organization-Provisioning-Token": "wrong-secret"},
-        json={"name": "Example Logistics", "country_code": "ke", "default_currency": "kes"},
+        json={"name": "Example Logistics", "country_code": "ke", "default_currency": "kes", "owner_subject": "founder-user-1"},
     )
 
     assert response.status_code == 403
@@ -93,7 +93,7 @@ def test_organization_creation_accepts_configured_provisioning_token(monkeypatch
     response = client.post(
         "/api/v1/organizations",
         headers={"X-Organization-Provisioning-Token": "configured-secret"},
-        json={"name": "Example Logistics", "country_code": "ke", "default_currency": "kes"},
+        json={"name": "Example Logistics", "country_code": "ke", "default_currency": "kes", "owner_subject": "founder-user-1"},
     )
 
     assert response.status_code == 200
