@@ -22,4 +22,22 @@ CREATE INDEX IF NOT EXISTS idx_organization_memberships_subject_status
 CREATE INDEX IF NOT EXISTS idx_organization_memberships_org_status
     ON organization_memberships(organization_id, status);
 
+CREATE TABLE IF NOT EXISTS organization_membership_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    actor_subject TEXT NOT NULL CHECK (length(actor_subject) BETWEEN 1 AND 255),
+    target_subject TEXT NOT NULL CHECK (length(target_subject) BETWEEN 1 AND 255),
+    event_type TEXT NOT NULL CHECK (
+        event_type IN ('member_added', 'role_changed', 'status_changed')
+    ),
+    previous_role TEXT,
+    new_role TEXT,
+    previous_status TEXT,
+    new_status TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_organization_membership_events_org_time
+    ON organization_membership_events(organization_id, created_at DESC);
+
 COMMIT;
