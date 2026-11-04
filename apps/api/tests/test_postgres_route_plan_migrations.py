@@ -42,6 +42,10 @@ def test_route_plan_migrations_are_rerunnable_and_enforce_invariants():
         conn.execute(migration_006, prepare=False)
         conn.execute(migration_006, prepare=False)
 
+        migration_007 = (API_ROOT / "migrations/007_organization_memberships.sql").read_text()
+        conn.execute(migration_007, prepare=False)
+        conn.execute(migration_007, prepare=False)
+
         organization_id = conn.execute(
             """
             INSERT INTO organizations (name, country_code, default_currency)
@@ -49,6 +53,51 @@ def test_route_plan_migrations_are_rerunnable_and_enforce_invariants():
             RETURNING id
             """
         ).fetchone()[0]
+        membership_id = conn.execute(
+            """
+            INSERT INTO organization_memberships (organization_id, user_subject, role)
+            VALUES (%s, %s, %s)
+            RETURNING id
+            """,
+            (organization_id, "oidc-user-migration-test", "operations_manager"),
+        ).fetchone()[0]
+
+        assert conn.execute(
+            "SELECT role, status FROM organization_memberships WHERE id = %s",
+            (membership_id,),
+        ).fetchone() == ("operations_manager", "active")
+
+        with pytest.raises(errors.UniqueViolation):
+            conn.execute(
+                """
+                INSERT INTO organization_memberships (organization_id, user_subject, role)
+                VALUES (%s, %s, %s)
+                """,
+                (organization_id, "oidc-user-migration-test", "viewer"),
+            )
+
+        with pytest.raises(errors.CheckViolation):
+            conn.execute(
+                """
+                INSERT INTO organization_memberships (organization_id, user_subject, role)
+                VALUES (%s, %s, %s)
+                """,
+                (organization_id, "invalid-role-user", "superuser"),
+            )
+
+        conn.execute(
+            "UPDATE organization_memberships SET role = 'viewer' WHERE id = %s",
+            (membership_id,),
+        )
+        conn.execute(
+            "UPDATE organization_memberships SET status = 'suspended' WHERE id = %s",
+            (membership_id,),
+        )
+        assert conn.execute(
+            "SELECT role, status FROM organization_memberships WHERE id = %s",
+            (membership_id,),
+        ).fetchone() == ("viewer", "suspended")
+
         shipment_id = conn.execute(
             """
             INSERT INTO shipments (
