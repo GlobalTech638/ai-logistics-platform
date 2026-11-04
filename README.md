@@ -72,14 +72,15 @@ The migration directory is present under `apps/api/migrations`. `001_initial.sql
 
 A typical operational decision flow is:
 
-1. Create an organization.
-2. Register vehicles and shipments.
-3. Ingest or record trips and fuel/maintenance events.
-4. Calculate fleet, corridor, and shipment risk.
-5. Generate explainable recommendations.
-6. Require an authorized operator to approve an executable recommendation.
-7. Execute vehicle reassignment or select and activate a route plan.
-8. Track the action through completion.
+1. Provision an organization with its initial owner subject; the owner receives an active admin membership.
+2. Add operator memberships and assign least-privilege roles.
+3. Register vehicles and shipments.
+4. Ingest or record trips and fuel/maintenance events.
+5. Calculate fleet, corridor, and shipment risk.
+6. Generate explainable recommendations.
+7. Require an authorized operator to approve an executable recommendation.
+8. Execute vehicle reassignment or select and activate a route plan.
+9. Track the action through completion.
 
 ## Roles
 
@@ -110,7 +111,7 @@ Production authorization additionally requires the `organization_memberships` an
 
 Organization administrators can add members through `POST /api/v1/organizations/{organization_id}/members` and change roles or status through `PATCH /api/v1/organizations/{organization_id}/members/{user_subject}`. These endpoints are tenant-scoped, admin-only, and write membership audit events in the same transaction. The last active administrator cannot be demoted or suspended, and membership changes are serialized per organization to prevent concurrent removal of all administrators.
 
-The OIDC integration validates the JWT signature using the configured JWKS, pins the accepted algorithm to RS256, and validates issuer, audience, expiry, and required claims. Configure the identity provider to issue short-lived access tokens and rotate signing keys through its JWKS. Provision organization membership and role assignment in the trusted identity layer; never accept role or tenant selection from unverified client input.
+The OIDC integration validates the JWT signature using the configured JWKS, pins the accepted algorithm to RS256, and validates issuer, audience, expiry, and required claims. Configure the identity provider to issue short-lived access tokens and rotate signing keys through its JWKS. The identity provider authenticates the subject; the platform's membership database is authoritative for organization access and effective role. Provision and administer memberships through the protected organization provisioning and admin endpoints; never accept role or tenant selection from unverified client input.
 
 Before production rollout, configure the identity provider's access-token claim mapping to this contract and verify key rotation, revocation/session termination behavior, MFA, account lifecycle, and organization membership changes. JWT signature verification alone does not provide immediate token revocation.
 
