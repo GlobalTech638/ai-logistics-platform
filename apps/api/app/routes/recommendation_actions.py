@@ -355,12 +355,22 @@ def list_recommendation_actions(
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT id, shipment_id, recommendation_type, priority,
-                       recommendation_score, title, rationale, expected_impact,
-                       status, notes, acted_by, created_at, updated_at, completed_at
-                FROM recommendation_actions
-                WHERE organization_id = %s
-                ORDER BY created_at DESC LIMIT 100
+                SELECT action.id, action.shipment_id, action.recommendation_type, action.priority,
+                       action.recommendation_score, action.title, action.rationale, action.expected_impact,
+                       action.status, action.notes, action.acted_by, action.created_at,
+                       action.updated_at, action.completed_at, active_trip.vehicle_id AS expected_vehicle_id
+                FROM recommendation_actions AS action
+                LEFT JOIN LATERAL (
+                    SELECT trip.vehicle_id
+                    FROM trips AS trip
+                    WHERE trip.organization_id = action.organization_id
+                      AND trip.shipment_id = action.shipment_id
+                      AND trip.completed_at IS NULL
+                    ORDER BY trip.id DESC
+                    LIMIT 1
+                ) AS active_trip ON TRUE
+                WHERE action.organization_id = %s
+                ORDER BY action.created_at DESC LIMIT 100
                 """,
                 (organization_id,),
             )
