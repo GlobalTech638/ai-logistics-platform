@@ -46,3 +46,26 @@ jobs:
       - name: Run tests
         # API code lives in apps/api while a legacy service package lives at repo root.
         run: PYTHONPATH=.:../.. pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build dashboard
+        run: npm run build
