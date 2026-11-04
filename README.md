@@ -91,7 +91,24 @@ A typical operational decision flow is:
 | `analyst` | Yes | No |
 | `viewer` | Yes | No |
 
-The current tenant context uses development headers. It is **not production authentication** and must be replaced with a real OAuth2/OIDC or equivalent asymmetric-token identity layer before production deployment.
+The API derives tenant identity and role from verified bearer-token claims. In development, tests and trusted local callers can use the short-lived HMAC token helper. In production (`APP_ENV=production`), that helper is disabled and the API accepts only identity-provider JWTs verified against the configured OIDC JWKS endpoint.
+
+### Production identity configuration
+
+Set these environment variables before starting the API:
+
+| Variable | Purpose |
+| --- | --- |
+| `APP_ENV=production` | Enables production identity validation and disables local token issuance. |
+| `OIDC_JWKS_URL` | HTTPS URL of the identity provider's JSON Web Key Set. |
+| `OIDC_ISSUER` | Exact HTTPS issuer expected in the token's `iss` claim. |
+| `OIDC_AUDIENCE` | API audience expected in the token's `aud` claim. |
+
+The identity provider must issue RS256-signed access tokens containing `sub`, `exp`, `iat`, `iss`, `aud`, `organization_id`, and `organization_role`. The role claim must be one of `admin`, `operations_manager`, `fleet_manager`, `analyst`, or `viewer`. The organization claim must be a UUID. Tenant and role headers supplied by clients are not used for authorization.
+
+The OIDC integration validates the JWT signature using the configured JWKS, pins the accepted algorithm to RS256, and validates issuer, audience, expiry, and required claims. Configure the identity provider to issue short-lived access tokens and rotate signing keys through its JWKS. Provision organization membership and role assignment in the trusted identity layer; never accept role or tenant selection from unverified client input.
+
+Before production rollout, configure the identity provider's access-token claim mapping to this contract and verify key rotation, revocation/session termination behavior, MFA, account lifecycle, and organization membership changes. JWT signature verification alone does not provide immediate token revocation.
 
 ## Engineering principles
 
@@ -109,7 +126,7 @@ The current tenant context uses development headers. It is **not production auth
 - Run the complete backend test suite in a real build environment.
 - Validate the PostgreSQL bootstrap/migration path against a clean and an existing database.
 - Execute an end-to-end shipment → risk → recommendation → approval → execution → completion scenario.
-- Replace development authentication with production identity management.
+- Complete production identity-provider onboarding, key rotation, revocation/session controls, MFA, and organization-membership lifecycle validation.
 - Add production monitoring, structured logging, and error tracking.
 - Expand country/currency/corridor configuration for African deployments.
 
