@@ -19,7 +19,7 @@ def test_organization_creation_fails_closed_without_provisioning_token(monkeypat
     monkeypatch.setattr(organizations, "get_connection", should_not_connect)
     response = client.post(
         "/api/v1/organizations",
-        json={"name": "Example Logistics", "country_code": "ke", "default_currency": "kes"},
+        json={"name": "Example Logistics", "country_code": "ke", "default_currency": "kes", "owner_subject": "founder-user-1"},
     )
 
     assert response.status_code == 403
@@ -61,6 +61,9 @@ def test_organization_creation_accepts_configured_provisioning_token(monkeypatch
             return False
 
         def execute(self, query, params):
+            if not hasattr(self, "executed"):
+                self.executed = []
+            self.executed.append((query, params))
             self.query = query
             self.params = params
 
@@ -96,4 +99,7 @@ def test_organization_creation_accepts_configured_provisioning_token(monkeypatch
     assert response.status_code == 200
     assert response.json()["country_code"] == "KE"
     assert response.json()["default_currency"] == "KES"
-    assert connection.fake_cursor.params == ("Example Logistics", "KE", "KES")
+    assert connection.fake_cursor.executed[0][1] == ("Example Logistics", "KE", "KES")
+    assert connection.fake_cursor.executed[1][1] == ("org-id", "founder-user-1")
+    assert "organization_memberships" in connection.fake_cursor.executed[1][0]
+    assert "organization_membership_events" in connection.fake_cursor.executed[2][0]
