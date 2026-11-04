@@ -234,6 +234,17 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
     )
     assert reopened.status_code == 409
 
+    # The operator queue must expose the current assignment as a stale-write precondition.
+    action_queue = client.get(
+        f"/api/v1/recommendations/{organization_id}/actions",
+        headers=headers,
+    )
+    assert action_queue.status_code == 200, action_queue.text
+    queued_action = next(
+        item for item in action_queue.json()["actions"] if item["id"] == str(action_id)
+    )
+    assert queued_action["expected_vehicle_id"] == str(replacement_vehicle_id)
+
     # A different action based on the old assignment must not overwrite a newer change.
     with get_connection() as conn:
         with conn.cursor() as cur:
