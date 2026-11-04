@@ -99,7 +99,7 @@ def test_production_oidc_verifies_signature_issuer_audience_and_tenant_claims(mo
         key = public_key
 
     class FakeJWKClient:
-        def __init__(self, url):
+        def __init__(self, url, timeout=5):
             assert url == "https://identity.example.com/.well-known/jwks.json"
 
         def get_signing_key_from_jwt(self, token):
@@ -183,7 +183,7 @@ def test_production_oidc_rejects_invalid_identity_claims(monkeypatch, claim_over
         key = public_key
 
     class FakeJWKClient:
-        def __init__(self, url):
+        def __init__(self, url, timeout=5):
             pass
 
         def get_signing_key_from_jwt(self, token):
