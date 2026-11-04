@@ -75,7 +75,7 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
                 INSERT INTO recommendation_actions (
                     organization_id, shipment_id, recommendation_type, status, acted_by
                 )
-                VALUES (%s, %s, 'reassign_vehicle', 'accepted', 'integration-operator')
+                VALUES (%s, %s, 'reassign_vehicle', 'proposed', 'integration-operator')
                 RETURNING id
                 """,
                 (organization_id, shipment_id),
@@ -89,7 +89,12 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
     client = TestClient(app)
     url = f"/api/v1/recommendations/actions/{action_id}/status"
 
-    # A rejected execution must leave both the action and trip unchanged.
+    # The action must be explicitly accepted before operational execution.
+    accepted = client.patch(url, json={"status": "accepted"}, headers=headers)
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["status"] == "accepted"
+
+    # A rejected execution must leave the action and trip unchanged.
     missing_key = client.patch(
         url,
         json={"status": "in_progress", "vehicle_id": str(inactive_vehicle_id)},
@@ -121,7 +126,7 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
                 "SELECT count(*) FROM recommendation_action_events WHERE action_id = %s",
                 (action_id,),
             )
-            assert cur.fetchone()[0] == 0
+            assert cur.fetchone()[0] == 1
 
     # A valid execution commits the trip reassignment, action state, and audit event together.
     idempotency_headers = {**headers, "Idempotency-Key": "reassign-integration-001"}
@@ -161,7 +166,7 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
                 "SELECT count(*) FROM recommendation_action_events WHERE action_id = %s",
                 (action_id,),
             )
-            assert cur.fetchone()[0] == 1
+            assert cur.fetchone()[0] == 2
             cur.execute(
                 "SELECT count(*) FROM recommendation_action_idempotency WHERE action_id = %s",
                 (action_id,),
@@ -172,7 +177,7 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
                 SELECT from_status, to_status, actor_id, event_type, details
                 FROM recommendation_action_events
                 WHERE action_id = %s
-                ORDER BY created_at DESC
+                ORDER BY created_at DESC, id DESC
                 LIMIT 1
                 """,
                 (action_id,),
@@ -193,8 +198,37 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
     )
     assert history.status_code == 200, history.text
     assert history.json()["action_id"] == str(action_id)
-    assert len(history.json()["events"]) == 1
+    assert [event["to_status"] for event in history.json()["events"]] == [
+        "accepted",
+        "in_progress",
+    ]
+    assert history.json()["events"][0]["from_status"] == "proposed"
     assert history.json()["events"][0]["actor_id"] == "integration-operator"
+
+    # Completion closes the operational loop and records a terminal audit event.
+    completed = client.patch(
+        url,
+        json={"status": "completed", "notes": "Replacement vehicle completed dispatch"},
+        headers=headers,
+    )
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["status"] == "completed"
+    assert completed.json()["completed_at"] is not None
+
+    completed_history = client.get(
+        f"/api/v1/recommendations/actions/{action_id}/events",
+        headers=headers,
+    )
+    assert completed_history.status_code == 200, completed_history.text
+    assert [event["to_status"] for event in completed_history.json()["events"]] == [
+        "accepted",
+        "in_progress",
+        "completed",
+    ]
+
+    # A completed action is terminal; it cannot be reopened.
+    reopened = client.patch(url, json={"status": "in_progress"}, headers=headers)
+    assert reopened.status_code == 409
 
     # A different action based on the old assignment must not overwrite a newer change.
     with get_connection() as conn:
