@@ -95,6 +95,7 @@ def recommendations(
                     FROM trips t
                     WHERE t.organization_id = %s
                         AND t.shipment_id IS NOT NULL
+                        AND t.completed_at IS NULL
                     ORDER BY
                         t.shipment_id,
                         (t.completed_at IS NULL) DESC,
