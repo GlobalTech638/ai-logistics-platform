@@ -157,6 +157,14 @@ def update_organization_member(
 
     with get_connection() as connection:
         with connection.cursor() as cursor:
+            # Serialize membership administration per organization. This prevents
+            # concurrent demotions from removing the final active administrator.
+            cursor.execute(
+                "SELECT id FROM organizations WHERE id = %s FOR UPDATE",
+                (organization_id,),
+            )
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="Organization not found")
             cursor.execute(
                 """
                 SELECT role, status
