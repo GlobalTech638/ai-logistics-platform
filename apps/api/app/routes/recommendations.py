@@ -107,6 +107,7 @@ def recommendations(
                     s.origin,
                     s.destination,
                     s.status,
+                    sv.vehicle_id AS current_vehicle_id,
                     COALESCE(MAX(a.score), 0) AS alert_score,
                     COALESCE(MAX(CASE WHEN a.alert_type = 'route_risk' THEN a.score ELSE 0 END), 0) AS corridor_score,
                     GREATEST(
@@ -135,7 +136,7 @@ def recommendations(
                     o.default_currency, sf.actual_litres, sf.expected_litres,
                     sf.avg_price_per_litre, sf.currency,
                     vm.actual_litres, vm.expected_litres, vm.maintenance_events,
-                    vm.trips, vm.active_trips, s.created_at
+                    vm.trips, vm.active_trips, sv.vehicle_id, s.created_at
                 ORDER BY alert_score DESC, s.created_at ASC
                 LIMIT 50
                 """,
@@ -159,6 +160,7 @@ def recommendations(
             origin,
             destination,
             status,
+            current_vehicle_id,
             alert_score,
             corridor_score,
             estimated_excess_fuel_cost,
@@ -200,6 +202,7 @@ def recommendations(
                 "shipment_reference": reference,
                 "route": {"origin": origin, "destination": destination},
                 "status": status,
+                "current_vehicle_id": str(current_vehicle_id) if current_vehicle_id else None,
                 "vehicle_health": {
                     "score": vehicle_health,
                     "signals": {
