@@ -66,7 +66,7 @@ Docker Compose is provided at the repository root:
 docker compose up --build
 ```
 
-The migration directory is present under `apps/api/migrations`. `001_initial.sql` currently establishes migration tracking rather than replacing the canonical bootstrap schema. Existing databases should apply migrations in order; `002_route_plans.sql` adds route-plan persistence and `003_route_plan_invariants.sql` enforces its lifecycle and one-active-route invariant.
+The migration directory is present under `apps/api/migrations`. `001_initial.sql` currently establishes migration tracking rather than replacing the canonical bootstrap schema. Apply migrations in order after the canonical bootstrap schema: `002_route_plans.sql` adds route-plan persistence, `003_route_plan_invariants.sql` enforces route lifecycle and the one-active-route invariant, `004_recommendation_action_events.sql` adds action audit history, `005_recommendation_action_idempotency.sql` adds execution replay protection, `006_tenant_relationship_integrity.sql` enforces cross-tenant relationship integrity, and `007_organization_memberships.sql` adds production membership and membership-audit storage. Migration integration tests apply migrations 002-007 twice to verify rerunnability.
 
 ## API workflow
 
