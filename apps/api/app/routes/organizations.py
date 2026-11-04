@@ -3,7 +3,7 @@ import os
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.auth.tenant import TenantContext, get_tenant_context
@@ -103,6 +103,51 @@ def organization_vehicles(
                 ORDER BY registration_number
                 """,
                 (organization_id,),
+            )
+            columns = [item.name for item in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+@router.get("/{organization_id}/members")
+def list_organization_members(
+    organization_id: UUID,
+    tenant: TenantContext = Depends(get_tenant_context),
+) -> list[dict]:
+    _require_org_admin(organization_id, tenant)
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT user_subject, role, status, created_at, updated_at
+                FROM organization_memberships
+                WHERE organization_id = %s
+                ORDER BY user_subject
+                """,
+                (organization_id,),
+            )
+            columns = [item.name for item in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+@router.get("/{organization_id}/membership-events")
+def list_membership_events(
+    organization_id: UUID,
+    limit: int = Query(default=50, ge=1, le=200),
+    tenant: TenantContext = Depends(get_tenant_context),
+) -> list[dict]:
+    _require_org_admin(organization_id, tenant)
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT actor_subject, target_subject, event_type,
+                       previous_role, new_role, previous_status, new_status, created_at
+                FROM organization_membership_events
+                WHERE organization_id = %s
+                ORDER BY created_at DESC, id DESC
+                LIMIT %s
+                """,
+                (organization_id, limit),
             )
             columns = [item.name for item in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
