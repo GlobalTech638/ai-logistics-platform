@@ -106,6 +106,8 @@ Set these environment variables before starting the API:
 
 The identity provider must issue RS256-signed access tokens containing `sub`, `exp`, `iat`, `iss`, `aud`, `organization_id`, and `organization_role`. The role claim must be one of `admin`, `operations_manager`, `fleet_manager`, `analyst`, or `viewer`. The organization claim must be a UUID. Tenant and role headers supplied by clients are not used for authorization.
 
+Production authorization additionally requires the `organization_memberships` table from migration `007_organization_memberships.sql`. Provision one active membership per user subject and organization before granting access. At request time, the API checks that membership is active and uses the database role as the authorization source of truth; a stale or elevated JWT role cannot override a downgraded database role. Missing, suspended, and revoked memberships are denied. Membership lifecycle changes therefore take effect on the next API request without waiting for access-token expiry.
+
 The OIDC integration validates the JWT signature using the configured JWKS, pins the accepted algorithm to RS256, and validates issuer, audience, expiry, and required claims. Configure the identity provider to issue short-lived access tokens and rotate signing keys through its JWKS. Provision organization membership and role assignment in the trusted identity layer; never accept role or tenant selection from unverified client input.
 
 Before production rollout, configure the identity provider's access-token claim mapping to this contract and verify key rotation, revocation/session termination behavior, MFA, account lifecycle, and organization membership changes. JWT signature verification alone does not provide immediate token revocation.
@@ -126,7 +128,7 @@ Before production rollout, configure the identity provider's access-token claim 
 - Run the complete backend test suite in a real build environment.
 - Validate the PostgreSQL bootstrap/migration path against a clean and an existing database.
 - Execute an end-to-end shipment → risk → recommendation → approval → execution → completion scenario.
-- Complete production identity-provider onboarding, key rotation, revocation/session controls, MFA, and organization-membership lifecycle validation.
+- Complete production identity-provider onboarding, key rotation, session/revocation controls, MFA, and organization-membership provisioning and operational workflows.
 - Add production monitoring, structured logging, and error tracking.
 - Expand country/currency/corridor configuration for African deployments.
 
