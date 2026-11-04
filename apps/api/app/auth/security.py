@@ -37,8 +37,19 @@ def _production_oidc_config() -> tuple[str, str, str]:
         raise RuntimeError(
             "Production requires OIDC_JWKS_URL, OIDC_ISSUER, and OIDC_AUDIENCE"
         )
-    if urlparse(jwks_url).scheme != "https" or urlparse(issuer).scheme != "https":
-        raise RuntimeError("Production OIDC JWKS URL and issuer must use HTTPS")
+    jwks = urlparse(jwks_url)
+    issuer_url = urlparse(issuer)
+    if (
+        jwks.scheme != "https"
+        or not jwks.hostname
+        or jwks.username
+        or jwks.password
+        or issuer_url.scheme != "https"
+        or not issuer_url.hostname
+        or issuer_url.username
+        or issuer_url.password
+    ):
+        raise RuntimeError("Production OIDC JWKS URL and issuer must be valid HTTPS URLs")
     return jwks_url, issuer, audience
 
 
@@ -76,7 +87,7 @@ def issue_access_token(user_id: str, organization_id: str, role: str) -> str:
 def _decode_oidc_claims(token: str) -> AccessClaims:
     jwks_url, issuer, audience = _production_oidc_config()
     try:
-        signing_key = jwt.PyJWKClient(jwks_url).get_signing_key_from_jwt(token).key
+        signing_key = jwt.PyJWKClient(jwks_url, timeout=5).get_signing_key_from_jwt(token).key
         payload = jwt.decode(
             token,
             signing_key,
