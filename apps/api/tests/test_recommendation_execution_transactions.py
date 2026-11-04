@@ -227,7 +227,11 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
     ]
 
     # A completed action is terminal; it cannot be reopened.
-    reopened = client.patch(url, json={"status": "in_progress"}, headers=headers)
+    reopened = client.patch(
+        url,
+        json={"status": "in_progress"},
+        headers={**headers, "Idempotency-Key": "reopen-completed-action-001"},
+    )
     assert reopened.status_code == 409
 
     # A different action based on the old assignment must not overwrite a newer change.
