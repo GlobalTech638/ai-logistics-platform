@@ -98,6 +98,22 @@ def test_route_plan_migrations_are_rerunnable_and_enforce_invariants():
             (membership_id,),
         ).fetchone() == ("viewer", "suspended")
 
+        membership_event_id = conn.execute(
+            """
+            INSERT INTO organization_membership_events (
+                organization_id, actor_subject, target_subject, event_type,
+                previous_role, new_role, previous_status, new_status
+            )
+            VALUES (%s, %s, %s, 'role_changed', 'operations_manager', 'viewer', 'active', 'active')
+            RETURNING id
+            """,
+            (organization_id, "admin-subject", "oidc-user-migration-test"),
+        ).fetchone()[0]
+        assert conn.execute(
+            "SELECT event_type, actor_subject, target_subject FROM organization_membership_events WHERE id = %s",
+            (membership_event_id,),
+        ).fetchone() == ("role_changed", "admin-subject", "oidc-user-migration-test")
+
         shipment_id = conn.execute(
             """
             INSERT INTO shipments (
