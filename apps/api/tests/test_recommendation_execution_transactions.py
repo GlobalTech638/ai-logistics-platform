@@ -245,6 +245,17 @@ def test_reassignment_failure_rolls_back_action_and_success_commits_both():
     )
     assert queued_action["expected_vehicle_id"] == str(replacement_vehicle_id)
 
+    recommendation_feed = client.get(
+        f"/api/v1/recommendations/{organization_id}",
+        headers=headers,
+    )
+    assert recommendation_feed.status_code == 200, recommendation_feed.text
+    shipment_feed = next(
+        item for item in recommendation_feed.json()["shipments"]
+        if item["shipment_id"] == str(shipment_id)
+    )
+    assert shipment_feed["current_vehicle_id"] == str(replacement_vehicle_id)
+
     # A different action based on the old assignment must not overwrite a newer change.
     with get_connection() as conn:
         with conn.cursor() as cur:
