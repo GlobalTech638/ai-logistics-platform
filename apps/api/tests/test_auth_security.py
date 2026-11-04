@@ -1,9 +1,11 @@
+from contextlib import contextmanager
 from uuid import UUID
 
 import pytest
 from fastapi import HTTPException
 
 from app.auth import security
+from app.auth import tenant as tenant_module
 from app.auth.tenant import get_tenant_context
 
 
@@ -125,6 +127,35 @@ def test_production_oidc_verifies_signature_issuer_audience_and_tenant_claims(mo
     )
 
     claims = security.get_access_claims(f"Bearer {token}")
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, query, params):
+            assert params == (UUID("a8d0b7be-7e6c-4d29-83d7-63ad0d0b0c21"), "oidc-user-17")
+
+        def fetchone(self):
+            return ("operations_manager", "active")
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def cursor(self):
+            return Cursor()
+
+    @contextmanager
+    def fake_connection():
+        yield Connection()
+
+    monkeypatch.setattr(tenant_module, "get_connection", fake_connection)
     tenant = get_tenant_context(claims)
 
     assert tenant.user_id == "oidc-user-17"
@@ -229,3 +260,98 @@ def test_production_rejects_non_https_or_hostless_oidc_endpoints(monkeypatch):
     monkeypatch.setenv("OIDC_JWKS_URL", "https:///jwks")
     with pytest.raises(RuntimeError, match="valid HTTPS URLs"):
         security._production_oidc_config()
+
+
+@pytest.mark.parametrize(
+    "membership,expected_status",
+    [
+        (None, 403),
+        (("admin", "suspended"), 403),
+        (("admin", "revoked"), 403),
+    ],
+)
+def test_production_rejects_missing_or_inactive_membership(monkeypatch, membership, expected_status):
+    monkeypatch.setenv("APP_ENV", "production")
+    claims = security.AccessClaims(
+        user_id="oidc-user-17",
+        organization_id="a8d0b7be-7e6c-4d29-83d7-63ad0d0b0c21",
+        role="admin",
+        expires_at=security.datetime.now(security.timezone.utc),
+    )
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, query, params):
+            assert params == (UUID(claims.organization_id), claims.user_id)
+
+        def fetchone(self):
+            return membership
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def cursor(self):
+            return Cursor()
+
+    @contextmanager
+    def fake_connection():
+        yield Connection()
+
+    monkeypatch.setattr(tenant_module, "get_connection", fake_connection)
+
+    with pytest.raises(HTTPException) as error:
+        get_tenant_context(claims)
+
+    assert error.value.status_code == expected_status
+
+
+def test_production_database_role_overrides_stale_token_role(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    claims = security.AccessClaims(
+        user_id="oidc-user-17",
+        organization_id="a8d0b7be-7e6c-4d29-83d7-63ad0d0b0c21",
+        role="admin",
+        expires_at=security.datetime.now(security.timezone.utc),
+    )
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, query, params):
+            pass
+
+        def fetchone(self):
+            return ("viewer", "active")
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def cursor(self):
+            return Cursor()
+
+    @contextmanager
+    def fake_connection():
+        yield Connection()
+
+    monkeypatch.setattr(tenant_module, "get_connection", fake_connection)
+
+    tenant = get_tenant_context(claims)
+
+    assert tenant.role == "viewer"
