@@ -355,3 +355,46 @@ def test_production_database_role_overrides_stale_token_role(monkeypatch):
     tenant = get_tenant_context(claims)
 
     assert tenant.role == "viewer"
+
+
+def test_production_oidc_rejects_valid_claims_with_invalid_signature(monkeypatch):
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    signing_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    unrelated_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+    class SigningKey:
+        key = unrelated_key.public_key()
+
+    class FakeJWKClient:
+        def __init__(self, url, timeout=5):
+            pass
+
+        def get_signing_key_from_jwt(self, token):
+            return SigningKey()
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("OIDC_JWKS_URL", "https://identity.example.com/jwks")
+    monkeypatch.setenv("OIDC_ISSUER", "https://identity.example.com/")
+    monkeypatch.setenv("OIDC_AUDIENCE", "logistics-api")
+    monkeypatch.setattr(security.jwt, "PyJWKClient", FakeJWKClient)
+
+    now = int(security.datetime.now(security.timezone.utc).timestamp())
+    token = security.jwt.encode(
+        {
+            "sub": "oidc-user-17",
+            "organization_id": "a8d0b7be-7e6c-4d29-83d7-63ad0d0b0c21",
+            "organization_role": "viewer",
+            "iss": "https://identity.example.com/",
+            "aud": "logistics-api",
+            "iat": now,
+            "exp": now + 300,
+        },
+        signing_key,
+        algorithm="RS256",
+    )
+
+    with pytest.raises(HTTPException) as error:
+        security.get_access_claims(f"Bearer {token}")
+
+    assert error.value.status_code == 401
