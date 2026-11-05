@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.auth.tenant import TenantContext, get_tenant_context
+from app.auth.tenant import TenantContext, get_tenant_context, require_current_role
 from app.db.database import get_connection
 
 router = APIRouter(prefix="/api/v1/operations", tags=["operations"])
@@ -40,6 +40,7 @@ def create_vehicle(
     require_org(organization_id, tenant)
     with get_connection() as connection:
         with connection.cursor() as cursor:
+            require_current_role(cursor, tenant, {"admin", "operations_manager", "fleet_manager"}, "Role is not authorized to create operational records")
             cursor.execute(
                 """
                 INSERT INTO vehicles
@@ -64,6 +65,7 @@ def create_shipment(
     require_org(organization_id, tenant)
     with get_connection() as connection:
         with connection.cursor() as cursor:
+            require_current_role(cursor, tenant, {"admin", "operations_manager", "fleet_manager"}, "Role is not authorized to create operational records")
             cursor.execute(
                 """
                 INSERT INTO shipments
