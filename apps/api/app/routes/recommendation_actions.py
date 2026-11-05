@@ -202,6 +202,7 @@ def update_recommendation_action_status(
     tenant: TenantContext = Depends(get_tenant_context),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", min_length=1, max_length=200),
 ) -> dict:
+    _require_action_role(tenant)
     request_hash = hashlib.sha256(
         json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
