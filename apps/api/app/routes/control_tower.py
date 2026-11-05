@@ -22,7 +22,7 @@ def overview(
                 """
                 SELECT
                     COUNT(*) AS total,
-                    COUNT(*) FILTER (WHERE status = 'active') AS active
+                    COUNT(*) FILTER (WHERE active IS TRUE) AS active
                 FROM vehicles
                 WHERE organization_id = %s
                 """,
