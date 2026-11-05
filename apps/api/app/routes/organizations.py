@@ -38,6 +38,26 @@ def _require_org_admin(organization_id: UUID, tenant: TenantContext) -> None:
         raise HTTPException(status_code=403, detail="Organization administrator role required")
 
 
+def _lock_and_verify_active_admin(cursor, organization_id: UUID, tenant: TenantContext) -> None:
+    """Revalidate the acting administrator while holding the membership row lock."""
+    if os.getenv("APP_ENV", "development").strip().lower() != "production":
+        return
+    cursor.execute(
+        """
+        SELECT role, status
+        FROM organization_memberships
+        WHERE organization_id = %s AND user_subject = %s
+        FOR SHARE
+        """,
+        (organization_id, tenant.user_id),
+    )
+    membership = cursor.fetchone()
+    if membership is None or membership[1] != "active":
+        raise HTTPException(status_code=403, detail="Organization membership is not active")
+    if membership[0] != "admin":
+        raise HTTPException(status_code=403, detail="Organization administrator role required")
+
+
 @router.post("")
 def create_organization(
     payload: OrganizationCreate,
@@ -168,6 +188,7 @@ def add_organization_member(
             )
             if cursor.fetchone() is None:
                 raise HTTPException(status_code=404, detail="Organization not found")
+            _lock_and_verify_active_admin(cursor, organization_id, tenant)
             cursor.execute(
                 """
                 INSERT INTO organization_memberships (organization_id, user_subject, role)
