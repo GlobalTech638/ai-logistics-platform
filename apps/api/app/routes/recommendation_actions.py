@@ -1,4 +1,5 @@
 import hashlib
+import os
 import json
 from uuid import UUID
 
@@ -205,6 +206,13 @@ def update_recommendation_action_status(
 
     with get_connection() as connection:
         with connection.cursor() as cursor:
+            if payload.status == "in_progress" and os.getenv("APP_ENV", "development").strip().lower() == "production":
+                cursor.execute("SELECT role, status FROM organization_memberships WHERE organization_id = %s AND user_subject = %s FOR SHARE", (tenant.organization_id, tenant.user_id))
+                membership = cursor.fetchone()
+                if membership is None or membership[1] != "active":
+                    raise HTTPException(status_code=403, detail="Organization membership is not active")
+                if membership[0] not in ACTION_ROLES:
+                    raise HTTPException(status_code=403, detail="Role is not authorized to execute recommendations")
             cursor.execute(
                 """
                 SELECT status, shipment_id, recommendation_type, notes, rationale
