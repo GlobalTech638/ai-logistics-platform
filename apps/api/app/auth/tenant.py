@@ -61,3 +61,30 @@ def get_tenant_context(claims: AccessClaims = Depends(get_access_claims)) -> Ten
         user_id=claims.user_id,
         role=role,
     )
+
+
+def require_current_role(cursor, tenant: TenantContext, allowed_roles: set[str], detail: str) -> None:
+    """Enforce an allowed role and lock its current membership for the transaction.
+
+    Production membership changes take a conflicting row lock, so revocation or
+    downgrade cannot race with a privileged write after this check.
+    """
+    if os.getenv("APP_ENV", "development").strip().lower() == "production":
+        cursor.execute(
+            """
+            SELECT role, status
+            FROM organization_memberships
+            WHERE organization_id = %s AND user_subject = %s
+            FOR SHARE
+            """,
+            (tenant.organization_id, tenant.user_id),
+        )
+        membership = cursor.fetchone()
+        if membership is None or membership[1] != "active":
+            raise HTTPException(status_code=403, detail="Organization membership is not active")
+        current_role = membership[0]
+    else:
+        current_role = tenant.role
+
+    if current_role not in allowed_roles:
+        raise HTTPException(status_code=403, detail=detail)
