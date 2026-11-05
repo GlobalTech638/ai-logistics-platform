@@ -398,3 +398,24 @@ def test_production_oidc_rejects_valid_claims_with_invalid_signature(monkeypatch
         security.get_access_claims(f"Bearer {token}")
 
     assert error.value.status_code == 401
+
+
+def test_production_membership_database_failure_returns_service_unavailable(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    claims = security.AccessClaims(
+        user_id="oidc-user-17",
+        organization_id="a8d0b7be-7e6c-4d29-83d7-63ad0d0b0c21",
+        role="admin",
+        expires_at=security.datetime.now(security.timezone.utc),
+    )
+
+    def unavailable_connection():
+        raise OSError("database unavailable")
+
+    monkeypatch.setattr(tenant_module, "get_connection", unavailable_connection)
+
+    with pytest.raises(HTTPException) as error:
+        get_tenant_context(claims)
+
+    assert error.value.status_code == 503
+    assert error.value.detail == "Organization authorization is temporarily unavailable"
