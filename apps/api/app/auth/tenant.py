@@ -31,17 +31,24 @@ def get_tenant_context(claims: AccessClaims = Depends(get_access_claims)) -> Ten
 
     role = claims.role
     if os.getenv("APP_ENV", "development").strip().lower() == "production":
-        with get_connection() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT role, status
-                    FROM organization_memberships
-                    WHERE organization_id = %s AND user_subject = %s
-                    """,
-                    (organization_id, claims.user_id),
-                )
-                membership = cursor.fetchone()
+        try:
+            with get_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT role, status
+                        FROM organization_memberships
+                        WHERE organization_id = %s AND user_subject = %s
+                        """,
+                        (organization_id, claims.user_id),
+                    )
+                    membership = cursor.fetchone()
+        except Exception as exc:
+            # Authorization must fail closed when the membership authority is unavailable.
+            raise HTTPException(
+                status_code=503,
+                detail="Organization authorization is temporarily unavailable",
+            ) from exc
 
         if membership is None:
             raise HTTPException(status_code=403, detail="Organization membership is not active")
