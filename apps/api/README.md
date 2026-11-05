@@ -62,10 +62,13 @@ Apply database migrations in order for an existing installation:
 3. `004_recommendation_action_events.sql`
 4. `005_recommendation_action_idempotency.sql`
 5. `006_tenant_relationship_integrity.sql`
+6. `007_organization_memberships.sql`
+
+Migration 007 creates the organization membership and membership-event tables used by production authorization. Apply it after migrations 002–006; the canonical schema does not replace this migration for existing or fresh installations.
 
 Migration 006 adds database triggers that reject cross-organization relationships between trips, vehicles, and shipments; fuel transactions and their vehicles/trips; maintenance events and vehicles; alerts and their referenced records; recommendation actions and shipments; action events/idempotency records and their actions; and route plans and shipments. It also makes tenant ownership immutable after row creation so moving a parent record cannot invalidate existing relationships. This protects data integrity even when writes bypass the API. Before production rollout, check existing data for cross-tenant relationships and repair any violations, then apply migrations in staging first.
 
-The canonical bootstrap schema at `app/db/schema.sql` includes the current tables, but existing installations must apply migrations in order. Back up the database and test migrations against a staging copy before production rollout.
+The canonical bootstrap schema at `app/db/schema.sql` creates the core operational tables. Organization membership tables are added by migration 007, and lifecycle/integrity constraints are applied by the ordered migrations above. Existing installations must apply every migration in order. Back up the database and test migrations against a staging copy before production rollout.
 
 ## Request observability
 
