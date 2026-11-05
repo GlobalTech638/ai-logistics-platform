@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.auth.tenant import TenantContext, get_tenant_context
+from app.auth.tenant import TenantContext, get_tenant_context, require_current_role
 from app.db.database import get_connection
 
 router = APIRouter(prefix="/api/v1/alerts", tags=["alerts"])
@@ -26,6 +26,7 @@ def update_alert_status(
 
     with get_connection() as connection:
         with connection.cursor() as cursor:
+            require_current_role(cursor, tenant, {"admin", "operations_manager", "fleet_manager"}, "Role is not authorized to update alerts")
             cursor.execute(
                 "SELECT status FROM alerts WHERE id = %s AND organization_id = %s",
                 (alert_id, tenant.organization_id),
