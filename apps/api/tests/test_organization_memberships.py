@@ -68,11 +68,12 @@ def test_last_active_admin_cannot_be_demoted_or_suspended(monkeypatch):
             self.query = query
 
         def fetchone(self):
-            if "SELECT id FROM organizations" in self.query:
+            normalized_query = " ".join(self.query.split())
+            if "SELECT id FROM organizations" in normalized_query:
                 return (ORG_ID,)
-            if "SELECT role, status FROM organization_memberships" in self.query:
+            if "SELECT role, status FROM organization_memberships" in normalized_query:
                 return ("admin", "active")
-            if "SELECT count(*)" in self.query:
+            if "SELECT count(*)" in normalized_query:
                 return (1,)
             raise AssertionError(f"Unexpected query: {self.query}")
 
