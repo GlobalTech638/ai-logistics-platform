@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.auth.tenant import TenantContext, get_tenant_context
+from app.auth.tenant import TenantContext, get_tenant_context, require_current_role
 from app.db.database import get_connection
 from app.services.route_plan_tracker import validate_transition
 
@@ -40,10 +40,9 @@ def create_route_plan(
 ) -> dict:
     if organization_id != tenant.organization_id:
         raise HTTPException(status_code=403, detail="Organization access denied")
-    _require_action_role(tenant)
-
     with get_connection() as connection:
         with connection.cursor() as cursor:
+            require_current_role(cursor, tenant, ACTION_ROLES, "Role is not authorized to manage route plans")
             cursor.execute(
                 "SELECT id FROM shipments WHERE id = %s AND organization_id = %s",
                 (shipment_id, organization_id),
@@ -113,10 +112,9 @@ def update_route_plan_status(
 ) -> dict:
     if organization_id != tenant.organization_id:
         raise HTTPException(status_code=403, detail="Organization access denied")
-    _require_action_role(tenant)
-
     with get_connection() as connection:
         with connection.cursor() as cursor:
+            require_current_role(cursor, tenant, ACTION_ROLES, "Role is not authorized to manage route plans")
             cursor.execute(
                 """
                 SELECT id, shipment_id, status
