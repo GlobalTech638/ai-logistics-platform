@@ -10,20 +10,24 @@ router = APIRouter(prefix="/api/v1/operations", tags=["operations"])
 
 
 class VehicleCreate(BaseModel):
-    vehicle_id: str = Field(min_length=1, max_length=100)
-    registration_number: str | None = None
-    vehicle_type: str | None = None
-    capacity_tonnes: float = Field(gt=0)
+    registration_number: str = Field(min_length=1, max_length=100)
+    make: str = Field(min_length=1, max_length=100)
+    model: str = Field(min_length=1, max_length=100)
+    fuel_type: str = Field(default="diesel", min_length=1, max_length=30)
+    expected_litres_per_100km: float = Field(default=20, gt=0)
+    capacity_tonnes: float | None = Field(default=None, gt=0)
     odometer_km: float = Field(default=0, ge=0)
+    active: bool = True
 
 
 class ShipmentCreate(BaseModel):
-    shipment_id: str = Field(min_length=1, max_length=100)
-    origin: str = Field(min_length=1)
-    destination: str = Field(min_length=1)
+    shipment_reference: str = Field(min_length=1, max_length=100)
+    origin: str = Field(min_length=1, max_length=200)
+    destination: str = Field(min_length=1, max_length=200)
     weight_tonnes: float = Field(gt=0)
     pickup_at: str | None = None
     delivery_at: str | None = None
+    status: str = Field(default="pending", min_length=1, max_length=30)
 
 
 def require_org(organization_id: UUID, tenant: TenantContext) -> None:
@@ -40,16 +44,27 @@ def create_vehicle(
     require_org(organization_id, tenant)
     with get_connection() as connection:
         with connection.cursor() as cursor:
-            require_current_role(cursor, tenant, {"admin", "operations_manager", "fleet_manager"}, "Role is not authorized to create operational records")
+            require_current_role(
+                cursor, tenant, {"admin", "operations_manager", "fleet_manager"},
+                "Role is not authorized to create operational records",
+            )
             cursor.execute(
                 """
-                INSERT INTO vehicles
-                    (organization_id, vehicle_id, registration_number, vehicle_type, capacity_tonnes, odometer_km)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                RETURNING id, vehicle_id, registration_number, vehicle_type, capacity_tonnes, odometer_km, status
+                INSERT INTO vehicles (
+                    organization_id, registration_number, make, model, fuel_type,
+                    expected_litres_per_100km, capacity_tonnes, odometer_km, active
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, organization_id, registration_number, make, model,
+                          fuel_type, expected_litres_per_100km, capacity_tonnes,
+                          odometer_km, active, created_at
                 """,
-                (organization_id, payload.vehicle_id.strip(), payload.registration_number, payload.vehicle_type,
-                 payload.capacity_tonnes, payload.odometer_km),
+                (
+                    organization_id, payload.registration_number.strip(),
+                    payload.make.strip(), payload.model.strip(), payload.fuel_type.strip(),
+                    payload.expected_litres_per_100km, payload.capacity_tonnes,
+                    payload.odometer_km, payload.active,
+                ),
             )
             row = cursor.fetchone()
             columns = [item.name for item in cursor.description]
@@ -65,16 +80,27 @@ def create_shipment(
     require_org(organization_id, tenant)
     with get_connection() as connection:
         with connection.cursor() as cursor:
-            require_current_role(cursor, tenant, {"admin", "operations_manager", "fleet_manager"}, "Role is not authorized to create operational records")
+            require_current_role(
+                cursor, tenant, {"admin", "operations_manager", "fleet_manager"},
+                "Role is not authorized to create operational records",
+            )
             cursor.execute(
                 """
-                INSERT INTO shipments
-                    (organization_id, shipment_id, origin, destination, weight_tonnes, pickup_at, delivery_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                RETURNING id, shipment_id, origin, destination, weight_tonnes, pickup_at, delivery_at, status
+                INSERT INTO shipments (
+                    organization_id, shipment_reference, origin, destination,
+                    weight_tonnes, pickup_at, delivery_at, status
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, organization_id, shipment_reference, origin,
+                          destination, weight_tonnes, pickup_at, delivery_at,
+                          status, created_at
                 """,
-                (organization_id, payload.shipment_id.strip(), payload.origin.strip(), payload.destination.strip(),
-                 payload.weight_tonnes, payload.pickup_at, payload.delivery_at),
+                (
+                    organization_id, payload.shipment_reference.strip(),
+                    payload.origin.strip(), payload.destination.strip(),
+                    payload.weight_tonnes, payload.pickup_at, payload.delivery_at,
+                    payload.status.strip(),
+                ),
             )
             row = cursor.fetchone()
             columns = [item.name for item in cursor.description]
