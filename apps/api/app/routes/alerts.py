@@ -28,7 +28,7 @@ def update_alert_status(
         with connection.cursor() as cursor:
             require_current_role(cursor, tenant, {"admin", "operations_manager", "fleet_manager"}, "Role is not authorized to update alerts")
             cursor.execute(
-                "SELECT status FROM alerts WHERE id = %s AND organization_id = %s",
+                "SELECT status FROM alerts WHERE id = %s AND organization_id = %s FOR UPDATE",
                 (alert_id, tenant.organization_id),
             )
             row = cursor.fetchone()
