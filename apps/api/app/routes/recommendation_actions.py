@@ -8,7 +8,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 from fastapi.encoders import jsonable_encoder
 
-from app.auth.tenant import TenantContext, get_tenant_context
+from app.auth.tenant import TenantContext, get_tenant_context, require_current_role
 from app.db.database import get_connection
 from app.services.action_tracker import completed_at_for_status, validate_transition
 
@@ -164,6 +164,10 @@ def record_recommendation_action(
 
     with get_connection() as connection:
         with connection.cursor() as cursor:
+            require_current_role(
+                cursor, tenant, ACTION_ROLES,
+                "Role is not authorized to execute recommendations",
+            )
             cursor.execute(
                 "SELECT id FROM shipments WHERE id = %s AND organization_id = %s",
                 (shipment_id, organization_id),
@@ -199,20 +203,16 @@ def update_recommendation_action_status(
     tenant: TenantContext = Depends(get_tenant_context),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", min_length=1, max_length=200),
 ) -> dict:
-    _require_action_role(tenant)
     request_hash = hashlib.sha256(
         json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
 
     with get_connection() as connection:
         with connection.cursor() as cursor:
-            if payload.status == "in_progress" and os.getenv("APP_ENV", "development").strip().lower() == "production":
-                cursor.execute("SELECT role, status FROM organization_memberships WHERE organization_id = %s AND user_subject = %s FOR SHARE", (tenant.organization_id, tenant.user_id))
-                membership = cursor.fetchone()
-                if membership is None or membership[1] != "active":
-                    raise HTTPException(status_code=403, detail="Organization membership is not active")
-                if membership[0] not in ACTION_ROLES:
-                    raise HTTPException(status_code=403, detail="Role is not authorized to execute recommendations")
+            require_current_role(
+                cursor, tenant, ACTION_ROLES,
+                "Role is not authorized to execute recommendations",
+            )
             cursor.execute(
                 """
                 SELECT status, shipment_id, recommendation_type, notes, rationale
