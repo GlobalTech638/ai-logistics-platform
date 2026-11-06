@@ -838,6 +838,55 @@ def complete_shipment_trip(
 
 
 
+
+
+@router.get("/{organization_id}/shipments/recent")
+def recent_shipments(
+    organization_id: UUID,
+    limit: int = Query(default=25, ge=1, le=100),
+    tenant: TenantContext = Depends(get_tenant_context),
+) -> dict:
+    """List recent shipment activity, including delivered shipments."""
+    require_org(organization_id, tenant)
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT s.id, s.shipment_reference, s.origin, s.destination,
+                       s.weight_tonnes, s.status, s.created_at,
+                       COALESCE(MAX(e.occurred_at), s.created_at) AS last_event_at,
+                       COUNT(e.id) AS event_count
+                FROM shipments s
+                LEFT JOIN shipment_events e
+                  ON e.organization_id = s.organization_id
+                 AND e.shipment_id = s.id
+                WHERE s.organization_id = %s
+                GROUP BY s.id
+                ORDER BY last_event_at DESC, s.created_at DESC, s.id
+                LIMIT %s
+                """,
+                (organization_id, limit),
+            )
+            rows = cursor.fetchall()
+    return {
+        "organization_id": str(organization_id),
+        "total_count": len(rows),
+        "shipments": [
+            {
+                "shipment_id": str(row[0]),
+                "shipment_reference": row[1],
+                "origin": row[2],
+                "destination": row[3],
+                "weight_tonnes": float(row[4]),
+                "status": row[5],
+                "created_at": row[6].isoformat(),
+                "last_event_at": row[7].isoformat(),
+                "event_count": int(row[8]),
+            }
+            for row in rows
+        ],
+    }
+
 @router.get("/{organization_id}/shipments/{shipment_id}/timeline")
 def shipment_timeline(
     organization_id: UUID,
