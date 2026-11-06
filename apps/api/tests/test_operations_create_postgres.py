@@ -57,6 +57,10 @@ def test_vehicle_and_shipment_creation_use_canonical_schema():
                 "status": "pending",
             },
         )
+        timeline = client.get(
+            f"/api/v1/operations/{organization_id}/shipments/{shipment.json()['id']}/timeline",
+            headers=headers,
+        )
 
     assert vehicle.status_code == 200, vehicle.text
     assert vehicle.json()["registration_number"] == f"KAA-{suffix}"
@@ -67,6 +71,10 @@ def test_vehicle_and_shipment_creation_use_canonical_schema():
     assert shipment.json()["shipment_reference"] == f"LOAD-{suffix}"
     assert shipment.json()["origin"] == "Nairobi"
     assert shipment.json()["status"] == "pending"
+    assert timeline.status_code == 200, timeline.text
+    assert timeline.json()["total_events"] == 1
+    assert timeline.json()["events"][0]["event_type"] == "shipment_created"
+    assert timeline.json()["events"][0]["actor_id"] == f"operations-manager-{suffix}"
 
     with get_connection() as conn:
         with conn.cursor() as cur:
