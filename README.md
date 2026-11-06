@@ -66,7 +66,7 @@ Docker Compose is provided at the repository root:
 docker compose up --build
 ```
 
-The migration directory is present under `apps/api/migrations`. `001_initial.sql` currently establishes migration tracking rather than replacing the canonical bootstrap schema. Apply migrations in order after the canonical bootstrap schema: `002_route_plans.sql` adds route-plan persistence, `003_route_plan_invariants.sql` enforces route lifecycle and the one-active-route invariant, `004_recommendation_action_events.sql` adds action audit history, `005_recommendation_action_idempotency.sql` adds execution replay protection, `006_tenant_relationship_integrity.sql` enforces cross-tenant relationship integrity, `007_organization_memberships.sql` adds production membership and membership-audit storage, and `008_one_active_trip_per_vehicle.sql` enforces at most one unfinished trip per vehicle. Migration integration tests apply migrations 002-008 twice to verify rerunnability.
+The migration directory is present under `apps/api/migrations`. `001_initial.sql` currently establishes migration tracking rather than replacing the canonical bootstrap schema. Apply migrations in order after the canonical bootstrap schema: `002_route_plans.sql` adds route-plan persistence, `003_route_plan_invariants.sql` enforces route lifecycle and the one-active-route invariant, `004_recommendation_action_events.sql` adds action audit history, `005_recommendation_action_idempotency.sql` adds execution replay protection, `006_tenant_relationship_integrity.sql` enforces cross-tenant relationship integrity, `007_organization_memberships.sql` adds production membership and membership-audit storage, and `008_one_active_trip_per_vehicle.sql` enforces at most one unfinished trip per vehicle; `009_shipment_vehicle_assignments.sql` separates dispatch reservations from trip telemetry; `010_dispatch_assignment_idempotency.sql` adds replay protection for assignment commands; `011_dispatch_assignment_release_events.sql` adds append-only assignment audit events and release metadata; and `012_trip_execution_lifecycle.sql` adds trip start/completion measurements, audit events, and command idempotency. CI applies migrations 002-012 against PostgreSQL 16 and runs the integration suite.
 
 ## API workflow
 
@@ -75,8 +75,9 @@ A typical operational decision flow is:
 1. Provision an organization with its initial owner subject; the owner receives an active admin membership.
 2. Add operator memberships and assign least-privilege roles.
 3. Register vehicles and shipments.
-4. Ingest or record trips and fuel/maintenance events.
-5. Calculate fleet, corridor, and shipment risk.
+4. Rank eligible vehicles, reserve a vehicle for a pending shipment, and start the trip when the vehicle departs.
+5. Record the end odometer to complete the trip; the API derives actual distance and elapsed duration, marks the shipment delivered, and releases the vehicle reservation.
+6. Ingest fuel/maintenance events and calculate fleet, corridor, and shipment risk.
 6. Generate explainable recommendations.
 7. Require an authorized operator to approve an executable recommendation.
 8. Execute vehicle reassignment or select and activate a route plan.
