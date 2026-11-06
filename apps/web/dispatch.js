@@ -19,6 +19,90 @@
 
 
 
+
+  async function loadProfitability() {
+    const summary = document.querySelector("#profitability-summary");
+    const list = document.querySelector("#shipment-profitability");
+    if (!summary || !list) return;
+    if (!organizationId) {
+      list.innerHTML = '<div class="empty">Configure an organization to view shipment profitability.</div>';
+      return;
+    }
+    try {
+      const response = await fetch(
+        api + "/api/v1/operations/" + organizationId + "/profitability?days=30&limit=50",
+        { headers: headers() }
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Profitability request failed");
+      summary.innerHTML = data.currency_totals.length
+        ? data.currency_totals.map((item) =>
+            '<span><strong>' + escapeHtml(item.currency) + ' ' +
+            Number(item.revenue).toLocaleString() + '</strong> revenue · Fuel ' +
+            Number(item.fuel_cost).toLocaleString() + ' · Contribution ' +
+            Number(item.fuel_contribution).toLocaleString() + '</span>'
+          ).join("")
+        : '<span>No revenue or fuel costs recorded in this period.</span>';
+      list.innerHTML = data.shipments.length ? data.shipments.map((item) =>
+        '<article class="dispatch-row profitability-row">' +
+          '<div class="dispatch-main"><strong>' + escapeHtml(item.shipment_reference) + '</strong>' +
+          '<small>' + escapeHtml(item.origin) + ' → ' + escapeHtml(item.destination) + '</small>' +
+          '<small>' + escapeHtml(item.status) + '</small></div>' +
+          '<div class="dispatch-main"><small>Revenue: ' + escapeHtml(item.currency) + ' ' + Number(item.revenue_amount).toLocaleString() + '</small>' +
+          '<small>Direct fuel: ' + escapeHtml(item.currency) + ' ' + Number(item.fuel_amount).toLocaleString() + '</small></div>' +
+          '<span class="dispatch-state ' + (item.fuel_contribution < 0 ? 'state-overdue_delivery' : 'state-delivered') + '">' +
+          escapeHtml(item.currency) + ' ' + Number(item.fuel_contribution).toLocaleString() +
+          '<small>' + (item.fuel_contribution_margin_percent === null ? 'No revenue margin' : escapeHtml(item.fuel_contribution_margin_percent) + '% contribution') + '</small></span>' +
+        '</article>'
+      ).join("") : '<div class="empty">Add customer charges and record fuel receipts to calculate shipment contribution.</div>';
+      list.insertAdjacentHTML("beforeend", '<p class="cost-scope">' + escapeHtml(data.cost_scope) + '</p>');
+    } catch (error) {
+      summary.textContent = "";
+      list.innerHTML = '<div class="empty">Profitability unavailable: ' + escapeHtml(error.message) + '</div>';
+    }
+  }
+
+  async function recordShipmentCharge(event) {
+    const row = event.currentTarget.closest(".recent-shipment-row");
+    const form = row.querySelector(".shipment-charge-form");
+    const feedback = form.querySelector(".charge-feedback");
+    const amount = Number(form.querySelector(".charge-amount").value);
+    const description = form.querySelector(".charge-description").value.trim();
+    const currency = form.querySelector(".charge-currency").value.trim().toUpperCase();
+    if (!(amount > 0) || !description || !/^[A-Z]{3}$/.test(currency)) {
+      feedback.textContent = "Enter a description, positive amount, and 3-letter currency.";
+      return;
+    }
+    event.currentTarget.disabled = true;
+    feedback.textContent = "Saving charge…";
+    try {
+      const response = await fetch(
+        api + "/api/v1/operations/" + organizationId + "/shipments/" +
+        encodeURIComponent(row.dataset.shipmentId) + "/charges",
+        {
+          method: "POST",
+          headers: commandHeaders(crypto.randomUUID()),
+          body: JSON.stringify({
+            charge_type: form.querySelector(".charge-type").value,
+            description,
+            amount,
+            currency
+          })
+        }
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Charge could not be saved");
+      feedback.textContent = "Saved " + data.currency + " " + Number(data.amount).toLocaleString();
+      form.querySelector(".charge-description").value = "";
+      form.querySelector(".charge-amount").value = "";
+      await loadProfitability();
+      event.currentTarget.disabled = false;
+    } catch (error) {
+      feedback.textContent = error.message;
+      event.currentTarget.disabled = false;
+    }
+  }
+
   async function loadTripPerformance() {
     const list = document.querySelector("#trip-performance");
     const summary = document.querySelector("#trip-performance-summary");
@@ -92,10 +176,24 @@
             : 'Due in ' + item.minutes_to_due + ' min') + '</small></div>' +
           '<span class="dispatch-state state-' + escapeHtml(item.exception_type) + '">' +
           escapeHtml(item.exception_type.replaceAll("_", " ")) + '</span>' +
-          '<div class="dispatch-actions"><button class="action-button shipment-timeline" type="button">Timeline</button></div>' +
+          '<div class="dispatch-actions"><button class="action-button shipment-timeline" type="button">Timeline</button>' +
+            (canExecute ? '<button class="action-button toggle-charge" type="button">Add charge</button>' : '') +
+          '</div>' +
+          (canExecute ? '<div class="shipment-charge-form" hidden>' +
+            '<select class="charge-type" aria-label="Charge type"><option value="transport">Transport</option><option value="handling">Handling</option><option value="fuel_surcharge">Fuel surcharge</option><option value="waiting_time">Waiting time</option><option value="other">Other</option></select>' +
+            '<input class="charge-description" maxlength="500" placeholder="Description" aria-label="Charge description">' +
+            '<input class="charge-amount" type="number" min="0.01" step="0.01" placeholder="Amount" aria-label="Charge amount">' +
+            '<input class="charge-currency" maxlength="3" minlength="3" placeholder="KES" aria-label="Currency">' +
+            '<button class="action-button save-charge" type="button">Save charge</button><small class="charge-feedback" aria-live="polite"></small>' +
+          '</div>' : '') +
         '</article>'
       ).join("") : '<div class="empty">No pickup or delivery exceptions detected.</div>';
       list.querySelectorAll(".shipment-timeline").forEach((button) => button.addEventListener("click", loadTimeline));
+      list.querySelectorAll(".toggle-charge").forEach((button) => button.addEventListener("click", (event) => {
+        const form = event.currentTarget.closest(".recent-shipment-row").querySelector(".shipment-charge-form");
+        form.hidden = !form.hidden;
+      }));
+      list.querySelectorAll(".save-charge").forEach((button) => button.addEventListener("click", recordShipmentCharge));
     } catch (error) {
       list.innerHTML = '<div class="empty">SLA monitoring unavailable: ' + escapeHtml(error.message) + '</div>';
     }
@@ -402,6 +500,7 @@
       await loadRecentShipments();
       await loadShipmentExceptions();
       await loadTripPerformance();
+      await loadProfitability();
     } catch (error) {
       feedback.textContent = error.message;
       event.currentTarget.disabled = false;
@@ -413,6 +512,7 @@
   });
   document.querySelector("#shipments-refresh")?.addEventListener("click", loadRecentShipments);
   document.querySelector("#exceptions-refresh")?.addEventListener("click", loadShipmentExceptions);
+  document.querySelector("#profitability-refresh")?.addEventListener("click", loadProfitability);
   document.querySelector("#performance-refresh")?.addEventListener("click", loadTripPerformance);
   document.querySelector("#dispatch-refresh")?.addEventListener("click", loadQueue);
   document.querySelector("#trips-refresh")?.addEventListener("click", loadActiveTrips);
@@ -420,5 +520,6 @@
   loadActiveTrips();
   loadRecentShipments();
   loadShipmentExceptions();
+  loadProfitability();
   loadTripPerformance();
 })();
