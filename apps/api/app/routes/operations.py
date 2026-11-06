@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.auth.tenant import TenantContext, get_tenant_context, require_current_role
@@ -127,6 +127,92 @@ def open_alerts(
             )
             columns = [item.name for item in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+@router.get("/{organization_id}/dispatch-queue")
+def dispatch_queue(
+    organization_id: UUID,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    tenant: TenantContext = Depends(get_tenant_context),
+) -> dict:
+    """List pending shipments and classify dispatch readiness without mutating state."""
+    require_org(organization_id, tenant)
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                WITH pending_shipments AS (
+                    SELECT s.id, s.shipment_reference, s.origin, s.destination,
+                           s.weight_tonnes, s.pickup_at, s.created_at,
+                           EXISTS (
+                               SELECT 1 FROM trips t
+                               WHERE t.organization_id = s.organization_id
+                                 AND t.shipment_id = s.id
+                                 AND t.completed_at IS NULL
+                           ) AS assigned,
+                           (
+                               SELECT COUNT(*)
+                               FROM vehicles v
+                               WHERE v.organization_id = s.organization_id
+                                 AND v.active IS TRUE
+                                 AND v.capacity_tonnes >= s.weight_tonnes
+                                 AND NOT EXISTS (
+                                     SELECT 1 FROM trips busy
+                                     WHERE busy.organization_id = v.organization_id
+                                       AND busy.vehicle_id = v.id
+                                       AND busy.completed_at IS NULL
+                                 )
+                           ) AS eligible_vehicle_count
+                    FROM shipments s
+                    WHERE s.organization_id = %s
+                      AND s.status = 'pending'
+                )
+                SELECT id, shipment_reference, origin, destination, weight_tonnes,
+                       pickup_at, created_at, assigned, eligible_vehicle_count,
+                       COUNT(*) OVER() AS total_count
+                FROM pending_shipments
+                ORDER BY created_at ASC, id ASC
+                LIMIT %s OFFSET %s
+                """,
+                (organization_id, limit, offset),
+            )
+            rows = cursor.fetchall()
+
+    shipments = []
+    total_count = rows[0][9] if rows else 0
+    for row in rows:
+        (
+            shipment_id, reference, origin, destination, weight, pickup_at,
+            created_at, assigned, eligible_count, _total,
+        ) = row
+        dispatch_state = (
+            "assigned" if assigned else "ready" if eligible_count > 0 else "blocked"
+        )
+        shipments.append({
+            "shipment_id": str(shipment_id),
+            "shipment_reference": reference,
+            "origin": origin,
+            "destination": destination,
+            "weight_tonnes": float(weight),
+            "pickup_at": pickup_at.isoformat() if pickup_at else None,
+            "created_at": created_at.isoformat(),
+            "dispatch_state": dispatch_state,
+            "eligible_vehicle_count": int(eligible_count),
+        })
+
+    return {
+        "organization_id": str(organization_id),
+        "total_count": total_count,
+        "limit": limit,
+        "offset": offset,
+        "summary": {
+            "ready": sum(item["dispatch_state"] == "ready" for item in shipments),
+            "blocked": sum(item["dispatch_state"] == "blocked" for item in shipments),
+            "assigned": sum(item["dispatch_state"] == "assigned" for item in shipments),
+        },
+        "shipments": shipments,
+    }
 
 
 @router.get("/{organization_id}/shipments/{shipment_id}/dispatch-candidates")
