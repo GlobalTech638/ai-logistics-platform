@@ -233,3 +233,29 @@ def test_shipment_revenue_idempotency_and_currency_safe_profitability():
                     """,
                     (organization_id, shipment_id, f"revenue-{suffix}"),
                 )
+    with pytest.raises(CheckViolation):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE shipment_operating_costs SET amount = 1 WHERE id = %s",
+                    (cost.json()["cost_id"],),
+                )
+    with pytest.raises(CheckViolation):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM shipment_operating_costs WHERE id = %s",
+                    (cost.json()["cost_id"],),
+                )
+    with pytest.raises(CheckViolation):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE shipment_operating_cost_idempotency
+                    SET response_body = '{}'::jsonb
+                    WHERE organization_id = %s AND shipment_id = %s
+                      AND idempotency_key = %s
+                    """,
+                    (organization_id, shipment_id, f"driver-cost-{suffix}"),
+                )
