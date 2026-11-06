@@ -1854,7 +1854,15 @@ def shipment_profitability(
                       AND t.shipment_id IS NOT NULL
                     GROUP BY t.shipment_id, f.currency
                 ),
-                combined AS (
+                operating_costs AS (
+                    SELECT c.shipment_id, c.currency,
+                           SUM(c.amount) AS operating_cost_amount
+                    FROM shipment_operating_costs c
+                    WHERE c.organization_id = %s
+                      AND c.occurred_at >= now() - (%s * INTERVAL '1 day')
+                    GROUP BY c.shipment_id, c.currency
+                ),
+                revenue_fuel AS (
                     SELECT COALESCE(r.shipment_id, f.shipment_id) AS shipment_id,
                            COALESCE(r.currency, f.currency) AS currency,
                            COALESCE(r.revenue_amount, 0) AS revenue_amount,
@@ -1862,14 +1870,26 @@ def shipment_profitability(
                     FROM revenue r
                     FULL OUTER JOIN fuel f
                       ON f.shipment_id = r.shipment_id AND f.currency = r.currency
+                ),
+                combined AS (
+                    SELECT COALESCE(rf.shipment_id, oc.shipment_id) AS shipment_id,
+                           COALESCE(rf.currency, oc.currency) AS currency,
+                           COALESCE(rf.revenue_amount, 0) AS revenue_amount,
+                           COALESCE(rf.fuel_amount, 0) AS fuel_amount,
+                           COALESCE(oc.operating_cost_amount, 0) AS operating_cost_amount
+                    FROM revenue_fuel rf
+                    FULL OUTER JOIN operating_costs oc
+                      ON oc.shipment_id = rf.shipment_id AND oc.currency = rf.currency
                 )
                 SELECT s.id AS shipment_id, s.shipment_reference, s.origin, s.destination,
                        s.status, c.currency, c.revenue_amount, c.fuel_amount,
+                       c.operating_cost_amount,
                        c.revenue_amount - c.fuel_amount AS fuel_contribution,
+                       c.revenue_amount - c.fuel_amount - c.operating_cost_amount AS net_contribution,
                        CASE WHEN c.revenue_amount > 0
-                            THEN ROUND(((c.revenue_amount - c.fuel_amount)
+                            THEN ROUND(((c.revenue_amount - c.fuel_amount - c.operating_cost_amount)
                                        / c.revenue_amount) * 100, 2)
-                            ELSE NULL END AS fuel_contribution_margin_percent
+                            ELSE NULL END AS net_contribution_margin_percent
                 FROM combined c
                 JOIN shipments s
                   ON s.id = c.shipment_id AND s.organization_id = %s
@@ -1877,7 +1897,7 @@ def shipment_profitability(
                          s.shipment_reference, c.currency
                 LIMIT %s
                 """,
-                (organization_id, days, organization_id, days, organization_id, limit),
+                (organization_id, days, organization_id, days, organization_id, days, organization_id, limit),
             )
             columns = [item.name for item in cursor.description]
             shipments = [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -1903,33 +1923,45 @@ def shipment_profitability(
                       AND t.shipment_id IS NOT NULL
                     GROUP BY f.currency
                 ),
+                operating_costs AS (
+                    SELECT currency, SUM(amount) AS amount
+                    FROM shipment_operating_costs
+                    WHERE organization_id = %s
+                      AND occurred_at >= now() - (%s * INTERVAL '1 day')
+                    GROUP BY currency
+                ),
                 currencies AS (
-                    SELECT currency FROM revenue UNION SELECT currency FROM fuel
+                    SELECT currency FROM revenue
+                    UNION SELECT currency FROM fuel
+                    UNION SELECT currency FROM operating_costs
                 )
                 SELECT c.currency, COALESCE(r.amount, 0) AS revenue,
                        COALESCE(f.amount, 0) AS fuel_cost,
-                       COALESCE(r.amount, 0) - COALESCE(f.amount, 0) AS fuel_contribution
+                       COALESCE(o.amount, 0) AS operating_cost,
+                       COALESCE(r.amount, 0) - COALESCE(f.amount, 0) - COALESCE(o.amount, 0) AS net_contribution
                 FROM currencies c
                 LEFT JOIN revenue r USING (currency)
                 LEFT JOIN fuel f USING (currency)
+                LEFT JOIN operating_costs o USING (currency)
                 ORDER BY c.currency
                 """,
-                (organization_id, days, organization_id, days),
+                (organization_id, days, organization_id, days, organization_id, days),
             )
             totals = [
                 {"currency": row[0], "revenue": float(row[1]),
-                 "fuel_cost": float(row[2]), "fuel_contribution": float(row[3])}
+                 "fuel_cost": float(row[2]), "operating_cost": float(row[3]),
+                 "net_contribution": float(row[4])}
                 for row in cursor.fetchall()
             ]
 
     for item in shipments:
-        for key in ("revenue_amount", "fuel_amount", "fuel_contribution"):
+        for key in ("revenue_amount", "fuel_amount", "operating_cost_amount", "fuel_contribution", "net_contribution"):
             item[key] = float(item[key])
-        if item["fuel_contribution_margin_percent"] is not None:
-            item["fuel_contribution_margin_percent"] = float(item["fuel_contribution_margin_percent"])
+        if item["net_contribution_margin_percent"] is not None:
+            item["net_contribution_margin_percent"] = float(item["net_contribution_margin_percent"])
     return {
         "organization_id": str(organization_id), "period_days": days,
         "currency_totals": totals, "shipments": shipments,
-        "cost_scope": "Direct recorded fuel only; maintenance and overhead are not allocated.",
+        "cost_scope": "Net contribution subtracts recorded shipment operating costs and shipment-linked fuel. Fleet-wide overhead and unallocated costs remain excluded.",
     }
 
