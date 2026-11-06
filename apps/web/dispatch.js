@@ -5,6 +5,7 @@
   const canExecute = ["admin", "operations_manager", "fleet_manager"].includes(role);
   const headers = () => ({
     "Content-Type": "application/json",
+    "Authorization": "Bearer " + (window.LOGISTICS_ACCESS_TOKEN || ""),
     "X-Organization-Id": organizationId,
     "X-User-Id": window.LOGISTICS_USER_ID || "dashboard-user",
     "X-User-Role": role
