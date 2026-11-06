@@ -69,9 +69,14 @@ def test_shipment_revenue_idempotency_and_currency_safe_profitability():
                 INSERT INTO fuel_transactions (
                     organization_id, vehicle_id, trip_id, transaction_time,
                     litres, price_per_litre, odometer_km, currency, country_code
-                ) VALUES (%s, %s, %s, %s, 20, 100, 250, 'KES', 'KE')
+                ) VALUES
+                    (%s, %s, %s, %s, 20, 100, 250, 'KES', 'KE'),
+                    (%s, %s, %s, %s, 2, 50, 300, 'USD', 'US')
                 """,
-                (organization_id, vehicle_id, trip_id, now),
+                (
+                    organization_id, vehicle_id, trip_id, now,
+                    organization_id, vehicle_id, trip_id, now,
+                ),
             )
 
     token = issue_access_token(
@@ -93,6 +98,13 @@ def test_shipment_revenue_idempotency_and_currency_safe_profitability():
         "currency": "KES",
         "occurred_at": now.isoformat(),
     }
+    usd_payload = {
+        "charge_type": "other",
+        "description": "Cross-border documentation",
+        "amount": 300,
+        "currency": "USD",
+        "occurred_at": now.isoformat(),
+    }
     with TestClient(app) as client:
         missing_key = client.post(url, json=first_payload, headers=headers)
         first = client.post(
@@ -111,6 +123,10 @@ def test_shipment_revenue_idempotency_and_currency_safe_profitability():
             url, json=second_payload,
             headers={**headers, "Idempotency-Key": f"handling-{suffix}"},
         )
+        usd_charge = client.post(
+            url, json=usd_payload,
+            headers={**headers, "Idempotency-Key": f"usd-charge-{suffix}"},
+        )
         profitability = client.get(
             f"/api/v1/operations/{organization_id}/profitability?days=30",
             headers=headers,
@@ -122,11 +138,13 @@ def test_shipment_revenue_idempotency_and_currency_safe_profitability():
     assert replay.json() == first.json()
     assert conflict.status_code == 409, conflict.text
     assert second.status_code == 200, second.text
+    assert usd_charge.status_code == 200, usd_charge.text
     assert profitability.status_code == 200, profitability.text
     data = profitability.json()
     assert data["period_days"] == 30
     assert data["currency_totals"] == [
-        {"currency": "KES", "revenue": 1250, "fuel_cost": 2000, "fuel_contribution": -750}
+        {"currency": "KES", "revenue": 1250, "fuel_cost": 2000, "fuel_contribution": -750},
+        {"currency": "USD", "revenue": 300, "fuel_cost": 100, "fuel_contribution": 200},
     ]
     assert len(data["shipments"]) == 1
     shipment = data["shipments"][0]
