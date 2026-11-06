@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
+from psycopg.errors import CheckViolation
 from fastapi.testclient import TestClient
 
 from app.auth.security import issue_access_token
@@ -155,3 +156,17 @@ def test_shipment_revenue_idempotency_and_currency_safe_profitability():
     assert shipment["fuel_contribution"] == -750
     assert shipment["fuel_contribution_margin_percent"] == -60
     assert "maintenance and overhead are not allocated" in data["cost_scope"]
+    with pytest.raises(CheckViolation):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE shipment_charges SET amount = 999 WHERE id = %s",
+                    (first.json()["charge_id"],),
+                )
+    with pytest.raises(CheckViolation):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM shipment_charges WHERE id = %s",
+                    (first.json()["charge_id"],),
+                )
