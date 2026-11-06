@@ -137,3 +137,104 @@ def test_trip_performance_uses_measured_distance_and_keeps_currency_costs_separa
         {"currency": "KES", "amount": 15000},
         {"currency": "USD", "amount": 40},
     ]
+
+
+@pytest.mark.skipif(
+    not os.getenv("DATABASE_URL"),
+    reason="DATABASE_URL is required for PostgreSQL API integration tests",
+)
+def test_active_trip_fuel_receipt_advances_odometer_and_rejects_rollback():
+    suffix = uuid4().hex[:10]
+    now = datetime.now(timezone.utc)
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO organizations (name, country_code, default_currency)
+                VALUES (%s, 'KE', 'KES') RETURNING id
+                """,
+                (f"Active fuel receipt {suffix}",),
+            )
+            organization_id = cur.fetchone()[0]
+            cur.execute(
+                """
+                INSERT INTO vehicles (
+                    organization_id, registration_number, make, model,
+                    expected_litres_per_100km, capacity_tonnes, odometer_km, active
+                ) VALUES (%s, %s, 'Test', 'Truck', 20, 15, 1000, TRUE)
+                RETURNING id
+                """,
+                (organization_id, f"ACTIVE-FUEL-{suffix}"),
+            )
+            vehicle_id = cur.fetchone()[0]
+            cur.execute(
+                """
+                INSERT INTO shipments (
+                    organization_id, shipment_reference, origin, destination,
+                    weight_tonnes, status
+                ) VALUES (%s, %s, 'Nairobi', 'Nakuru', 5, 'in_transit')
+                RETURNING id
+                """,
+                (organization_id, f"ACTIVE-FUEL-LOAD-{suffix}"),
+            )
+            shipment_id = cur.fetchone()[0]
+            cur.execute(
+                """
+                INSERT INTO trips (
+                    organization_id, vehicle_id, shipment_id, origin, destination,
+                    distance_km, planned_duration_minutes, actual_duration_minutes,
+                    load_tonnes, started_at, started_by, start_odometer_km
+                ) VALUES (
+                    %s, %s, %s, 'Nairobi', 'Nakuru', 160, 150, NULL,
+                    5, %s, 'operator', 1000
+                ) RETURNING id
+                """,
+                (organization_id, vehicle_id, shipment_id, now),
+            )
+            trip_id = cur.fetchone()[0]
+
+    token = issue_access_token(
+        f"active-fuel-operator-{suffix}", str(organization_id), "operations_manager"
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"/api/v1/operations/{organization_id}/fuel-transactions"
+    payload = {
+        "vehicle_id": str(vehicle_id),
+        "trip_id": str(trip_id),
+        "transaction_time": now.isoformat(),
+        "litres": 25,
+        "price_per_litre": 160,
+        "odometer_km": 1100,
+        "currency": "KES",
+        "country_code": "KE",
+    }
+    with TestClient(app) as client:
+        recorded = client.post(
+            url, json=payload,
+            headers={**headers, "Idempotency-Key": f"active-fuel-{suffix}"},
+        )
+        replay = client.post(
+            url, json=payload,
+            headers={**headers, "Idempotency-Key": f"active-fuel-{suffix}"},
+        )
+        rollback = client.post(
+            url, json={**payload, "odometer_km": 1050},
+            headers={**headers, "Idempotency-Key": f"active-fuel-rollback-{suffix}"},
+        )
+
+    assert recorded.status_code == 200, recorded.text
+    assert replay.status_code == 200, replay.text
+    assert replay.json() == recorded.json()
+    assert rollback.status_code == 409, rollback.text
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT odometer_km FROM vehicles WHERE id = %s",
+                (vehicle_id,),
+            )
+            assert float(cur.fetchone()[0]) == 1100
+            cur.execute(
+                "SELECT count(*) FROM fuel_transactions WHERE trip_id = %s",
+                (trip_id,),
+            )
+            assert cur.fetchone()[0] == 1
