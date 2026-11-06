@@ -34,6 +34,16 @@ class DispatchAssignmentRelease(BaseModel):
     reason: str = Field(default="operator_cancelled", min_length=1, max_length=500)
 
 
+class TripStart(BaseModel):
+    planned_distance_km: float = Field(gt=0)
+    planned_duration_minutes: int = Field(gt=0)
+    start_odometer_km: float = Field(ge=0)
+
+
+class TripComplete(BaseModel):
+    end_odometer_km: float = Field(ge=0)
+
+
 class ShipmentCreate(BaseModel):
     shipment_reference: str = Field(min_length=1, max_length=100)
     origin: str = Field(min_length=1, max_length=200)
@@ -429,6 +439,349 @@ def release_shipment_assignment(
                 INSERT INTO dispatch_assignment_idempotency (
                     organization_id, shipment_id, idempotency_key,
                     request_hash, response_body
+                ) VALUES (%s, %s, %s, %s, %s)
+                """,
+                (organization_id, shipment_id, idempotency_key, request_hash, Jsonb(response_body)),
+            )
+    return response_body
+
+
+
+
+@router.post("/{organization_id}/shipments/{shipment_id}/start-trip")
+def start_shipment_trip(
+    organization_id: UUID,
+    shipment_id: UUID,
+    payload: TripStart,
+    tenant: TenantContext = Depends(get_tenant_context),
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=200
+    ),
+) -> dict:
+    """Start a real trip from an active dispatch reservation."""
+    require_org(organization_id, tenant)
+    if idempotency_key is None:
+        raise HTTPException(status_code=428, detail="Idempotency-Key is required to start a trip")
+    request_hash = hashlib.sha256(
+        json.dumps(
+            {"operation": "start_trip", **payload.model_dump()},
+            sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            require_current_role(
+                cursor, tenant, {"admin", "operations_manager", "fleet_manager"},
+                "Role is not authorized to start trips",
+            )
+            cursor.execute(
+                """
+                SELECT id, origin, destination, weight_tonnes, status
+                FROM shipments
+                WHERE id = %s AND organization_id = %s
+                FOR UPDATE
+                """,
+                (shipment_id, organization_id),
+            )
+            shipment = cursor.fetchone()
+            if shipment is None:
+                raise HTTPException(status_code=404, detail="Shipment not found")
+
+            cursor.execute(
+                """
+                SELECT request_hash, response_body
+                FROM trip_command_idempotency
+                WHERE organization_id = %s AND shipment_id = %s AND idempotency_key = %s
+                """,
+                (organization_id, shipment_id, idempotency_key),
+            )
+            cached = cursor.fetchone()
+            if cached:
+                if cached[0] != request_hash:
+                    raise HTTPException(status_code=409, detail="Idempotency-Key conflicts with another trip command")
+                return cached[1]
+
+            _, origin, destination, load_tonnes, shipment_status = shipment
+            if shipment_status != "pending":
+                raise HTTPException(status_code=409, detail="Only pending shipments can start a trip")
+
+            cursor.execute(
+                """
+                SELECT id, vehicle_id
+                FROM shipment_vehicle_assignments
+                WHERE organization_id = %s AND shipment_id = %s AND released_at IS NULL
+                FOR UPDATE
+                """,
+                (organization_id, shipment_id),
+            )
+            assignment = cursor.fetchone()
+            if assignment is None:
+                raise HTTPException(status_code=409, detail="Shipment has no active vehicle reservation")
+            assignment_id, vehicle_id = assignment
+
+            cursor.execute(
+                """
+                SELECT odometer_km, active, capacity_tonnes
+                FROM vehicles
+                WHERE id = %s AND organization_id = %s
+                FOR UPDATE
+                """,
+                (vehicle_id, organization_id),
+            )
+            vehicle = cursor.fetchone()
+            if vehicle is None:
+                raise HTTPException(status_code=404, detail="Reserved vehicle not found")
+            current_odometer, active, capacity = vehicle
+            if not active:
+                raise HTTPException(status_code=409, detail="Reserved vehicle is inactive")
+            if capacity is None or capacity < load_tonnes:
+                raise HTTPException(status_code=409, detail="Reserved vehicle no longer meets shipment capacity")
+            if payload.start_odometer_km < current_odometer:
+                raise HTTPException(status_code=409, detail="Start odometer cannot be below the vehicle's recorded odometer")
+
+            cursor.execute(
+                """
+                SELECT id FROM trips
+                WHERE organization_id = %s AND vehicle_id = %s AND completed_at IS NULL
+                FOR UPDATE
+                """,
+                (organization_id, vehicle_id),
+            )
+            if cursor.fetchone():
+                raise HTTPException(status_code=409, detail="Vehicle already has an unfinished trip")
+
+            cursor.execute(
+                """
+                INSERT INTO trips (
+                    organization_id, vehicle_id, shipment_id, origin, destination,
+                    distance_km, planned_duration_minutes, actual_duration_minutes,
+                    load_tonnes, started_at, started_by, start_odometer_km
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, %s, now(), %s, %s)
+                RETURNING id, started_at
+                """,
+                (
+                    organization_id, vehicle_id, shipment_id, origin, destination,
+                    payload.planned_distance_km, payload.planned_duration_minutes,
+                    load_tonnes, tenant.user_id, payload.start_odometer_km,
+                ),
+            )
+            trip_id, started_at = cursor.fetchone()
+            cursor.execute(
+                "UPDATE shipments SET status = 'in_transit' WHERE id = %s AND organization_id = %s",
+                (shipment_id, organization_id),
+            )
+            cursor.execute(
+                """
+                INSERT INTO trip_events (
+                    organization_id, trip_id, shipment_id, vehicle_id,
+                    event_type, actor_id, details
+                ) VALUES (%s, %s, %s, %s, 'started', %s, %s)
+                """,
+                (
+                    organization_id, trip_id, shipment_id, vehicle_id,
+                    tenant.user_id,
+                    Jsonb({
+                        "assignment_id": str(assignment_id),
+                        "start_odometer_km": payload.start_odometer_km,
+                        "planned_distance_km": payload.planned_distance_km,
+                        "planned_duration_minutes": payload.planned_duration_minutes,
+                    }),
+                ),
+            )
+            response_body = {
+                "organization_id": str(organization_id),
+                "shipment_id": str(shipment_id),
+                "assignment_id": str(assignment_id),
+                "trip_id": str(trip_id),
+                "vehicle_id": str(vehicle_id),
+                "status": "in_progress",
+                "started_by": tenant.user_id,
+                "started_at": started_at.isoformat(),
+                "start_odometer_km": payload.start_odometer_km,
+            }
+            cursor.execute(
+                """
+                INSERT INTO trip_command_idempotency (
+                    organization_id, shipment_id, idempotency_key, request_hash, response_body
+                ) VALUES (%s, %s, %s, %s, %s)
+                """,
+                (organization_id, shipment_id, idempotency_key, request_hash, Jsonb(response_body)),
+            )
+    return response_body
+
+
+@router.post("/{organization_id}/shipments/{shipment_id}/trips/{trip_id}/complete")
+def complete_shipment_trip(
+    organization_id: UUID,
+    shipment_id: UUID,
+    trip_id: UUID,
+    payload: TripComplete,
+    tenant: TenantContext = Depends(get_tenant_context),
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=200
+    ),
+) -> dict:
+    """Complete a trip using measured odometer distance and elapsed time."""
+    require_org(organization_id, tenant)
+    if idempotency_key is None:
+        raise HTTPException(status_code=428, detail="Idempotency-Key is required to complete a trip")
+    request_hash = hashlib.sha256(
+        json.dumps(
+            {"operation": "complete_trip", "trip_id": str(trip_id), **payload.model_dump()},
+            sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            require_current_role(
+                cursor, tenant, {"admin", "operations_manager", "fleet_manager"},
+                "Role is not authorized to complete trips",
+            )
+            cursor.execute(
+                """
+                SELECT id, status
+                FROM shipments
+                WHERE id = %s AND organization_id = %s
+                FOR UPDATE
+                """,
+                (shipment_id, organization_id),
+            )
+            shipment = cursor.fetchone()
+            if shipment is None:
+                raise HTTPException(status_code=404, detail="Shipment not found")
+
+            cursor.execute(
+                """
+                SELECT request_hash, response_body
+                FROM trip_command_idempotency
+                WHERE organization_id = %s AND shipment_id = %s AND idempotency_key = %s
+                """,
+                (organization_id, shipment_id, idempotency_key),
+            )
+            cached = cursor.fetchone()
+            if cached:
+                if cached[0] != request_hash:
+                    raise HTTPException(status_code=409, detail="Idempotency-Key conflicts with another trip command")
+                return cached[1]
+
+            if shipment[1] != "in_transit":
+                raise HTTPException(status_code=409, detail="Shipment is not in transit")
+
+            cursor.execute(
+                """
+                SELECT vehicle_id, started_at, start_odometer_km, completed_at
+                FROM trips
+                WHERE id = %s AND organization_id = %s AND shipment_id = %s
+                FOR UPDATE
+                """,
+                (trip_id, organization_id, shipment_id),
+            )
+            trip = cursor.fetchone()
+            if trip is None:
+                raise HTTPException(status_code=404, detail="Trip not found")
+            vehicle_id, started_at, start_odometer, completed_at = trip
+            if completed_at is not None:
+                raise HTTPException(status_code=409, detail="Trip has already been completed")
+            if start_odometer is None:
+                raise HTTPException(status_code=409, detail="Trip is missing its start odometer reading")
+            if payload.end_odometer_km <= start_odometer:
+                raise HTTPException(status_code=422, detail="End odometer must be greater than start odometer")
+
+            cursor.execute(
+                "SELECT odometer_km FROM vehicles WHERE id = %s AND organization_id = %s FOR UPDATE",
+                (vehicle_id, organization_id),
+            )
+            vehicle = cursor.fetchone()
+            if vehicle is None:
+                raise HTTPException(status_code=404, detail="Trip vehicle not found")
+            if payload.end_odometer_km < vehicle[0]:
+                raise HTTPException(status_code=409, detail="End odometer cannot be below the vehicle's recorded odometer")
+
+            cursor.execute(
+                """
+                UPDATE trips
+                SET completed_at = now(),
+                    completed_by = %s,
+                    end_odometer_km = %s,
+                    actual_distance_km = %s - start_odometer_km,
+                    actual_duration_minutes = GREATEST(
+                        1, FLOOR(EXTRACT(EPOCH FROM (now() - started_at)) / 60)::integer
+                    )
+                WHERE id = %s AND organization_id = %s
+                RETURNING completed_at, actual_distance_km, actual_duration_minutes
+                """,
+                (tenant.user_id, payload.end_odometer_km, payload.end_odometer_km, trip_id, organization_id),
+            )
+            completed_at, actual_distance, actual_duration = cursor.fetchone()
+            cursor.execute(
+                "UPDATE vehicles SET odometer_km = %s WHERE id = %s AND organization_id = %s",
+                (payload.end_odometer_km, vehicle_id, organization_id),
+            )
+            cursor.execute(
+                "UPDATE shipments SET status = 'delivered' WHERE id = %s AND organization_id = %s",
+                (shipment_id, organization_id),
+            )
+
+            cursor.execute(
+                """
+                UPDATE shipment_vehicle_assignments
+                SET released_at = now(), released_by = %s, release_reason = 'trip_completed'
+                WHERE organization_id = %s AND shipment_id = %s
+                  AND vehicle_id = %s AND released_at IS NULL
+                RETURNING id
+                """,
+                (tenant.user_id, organization_id, shipment_id, vehicle_id),
+            )
+            released_assignment = cursor.fetchone()
+            if released_assignment:
+                cursor.execute(
+                    """
+                    INSERT INTO dispatch_assignment_events (
+                        organization_id, assignment_id, shipment_id, vehicle_id,
+                        event_type, actor_id, details
+                    ) VALUES (%s, %s, %s, %s, 'released', %s, %s)
+                    """,
+                    (
+                        organization_id, released_assignment[0], shipment_id, vehicle_id,
+                        tenant.user_id, Jsonb({"reason": "trip_completed", "trip_id": str(trip_id)}),
+                    ),
+                )
+
+            cursor.execute(
+                """
+                INSERT INTO trip_events (
+                    organization_id, trip_id, shipment_id, vehicle_id,
+                    event_type, actor_id, details
+                ) VALUES (%s, %s, %s, %s, 'completed', %s, %s)
+                """,
+                (
+                    organization_id, trip_id, shipment_id, vehicle_id,
+                    tenant.user_id,
+                    Jsonb({
+                        "end_odometer_km": payload.end_odometer_km,
+                        "actual_distance_km": float(actual_distance),
+                        "actual_duration_minutes": actual_duration,
+                    }),
+                ),
+            )
+            response_body = {
+                "organization_id": str(organization_id),
+                "shipment_id": str(shipment_id),
+                "trip_id": str(trip_id),
+                "vehicle_id": str(vehicle_id),
+                "status": "completed",
+                "completed_by": tenant.user_id,
+                "completed_at": completed_at.isoformat(),
+                "actual_distance_km": float(actual_distance),
+                "actual_duration_minutes": actual_duration,
+                "end_odometer_km": payload.end_odometer_km,
+            }
+            cursor.execute(
+                """
+                INSERT INTO trip_command_idempotency (
+                    organization_id, shipment_id, idempotency_key, request_hash, response_body
                 ) VALUES (%s, %s, %s, %s, %s)
                 """,
                 (organization_id, shipment_id, idempotency_key, request_hash, Jsonb(response_body)),
