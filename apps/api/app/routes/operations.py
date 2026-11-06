@@ -1630,6 +1630,10 @@ def create_shipment_charge(
     require_org(organization_id, tenant)
     if idempotency_key is None:
         raise HTTPException(status_code=428, detail="Idempotency-Key is required to record shipment revenue")
+    if payload.occurred_at is not None and (
+        payload.occurred_at.tzinfo is None or payload.occurred_at.utcoffset() is None
+    ):
+        raise HTTPException(status_code=422, detail="occurred_at must include a timezone")
     occurred_at = payload.occurred_at or datetime.now().astimezone()
     request_hash = hashlib.sha256(json.dumps(
         {"operation": "create_shipment_charge", "shipment_id": str(shipment_id),
