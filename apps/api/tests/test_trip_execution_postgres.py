@@ -101,6 +101,10 @@ def test_trip_start_and_completion_are_idempotent_and_release_vehicle():
             f"{base}/shipments/{shipment_id}/timeline",
             headers=headers,
         )
+        recent = client.get(
+            f"{base}/shipments/recent",
+            headers=headers,
+        )
 
     assert assignment.status_code == 200, assignment.text
     assert missing_start_key.status_code == 428, missing_start_key.text
@@ -122,6 +126,11 @@ def test_trip_start_and_completion_are_idempotent_and_release_vehicle():
         "shipment_created", "vehicle_assigned", "trip_started", "trip_completed"
     ]
     assert timeline.json()["status"] == "delivered"
+    assert recent.status_code == 200, recent.text
+    assert any(
+        item["shipment_id"] == str(shipment_id) and item["status"] == "delivered"
+        for item in recent.json()["shipments"]
+    )
 
     with get_connection() as conn:
         with conn.cursor() as cur:
