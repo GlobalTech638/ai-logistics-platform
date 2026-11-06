@@ -39,8 +39,9 @@
         ? data.currency_totals.map((item) =>
             '<span><strong>' + escapeHtml(item.currency) + ' ' +
             Number(item.revenue).toLocaleString() + '</strong> revenue · Fuel ' +
-            Number(item.fuel_cost).toLocaleString() + ' · Contribution ' +
-            Number(item.fuel_contribution).toLocaleString() + '</span>'
+            Number(item.fuel_cost).toLocaleString() + ' · Operating costs ' +
+            Number(item.operating_cost).toLocaleString() + ' · Net ' +
+            Number(item.net_contribution).toLocaleString() + '</span>'
           ).join("")
         : '<span>No revenue or fuel costs recorded in this period.</span>';
       list.innerHTML = data.shipments.length ? data.shipments.map((item) =>
@@ -49,12 +50,13 @@
           '<small>' + escapeHtml(item.origin) + ' → ' + escapeHtml(item.destination) + '</small>' +
           '<small>' + escapeHtml(item.status) + '</small></div>' +
           '<div class="dispatch-main"><small>Revenue: ' + escapeHtml(item.currency) + ' ' + Number(item.revenue_amount).toLocaleString() + '</small>' +
-          '<small>Direct fuel: ' + escapeHtml(item.currency) + ' ' + Number(item.fuel_amount).toLocaleString() + '</small></div>' +
-          '<span class="dispatch-state ' + (item.fuel_contribution < 0 ? 'state-overdue_delivery' : 'state-delivered') + '">' +
-          escapeHtml(item.currency) + ' ' + Number(item.fuel_contribution).toLocaleString() +
-          '<small>' + (item.fuel_contribution_margin_percent === null ? 'No revenue margin' : escapeHtml(item.fuel_contribution_margin_percent) + '% contribution') + '</small></span>' +
+          '<small>Direct fuel: ' + escapeHtml(item.currency) + ' ' + Number(item.fuel_amount).toLocaleString() + '</small>' +
+          '<small>Operating costs: ' + escapeHtml(item.currency) + ' ' + Number(item.operating_cost_amount).toLocaleString() + '</small></div>' +
+          '<span class="dispatch-state ' + (item.net_contribution < 0 ? 'state-overdue_delivery' : 'state-delivered') + '">' +
+          escapeHtml(item.currency) + ' ' + Number(item.net_contribution).toLocaleString() +
+          '<small>' + (item.net_contribution_margin_percent === null ? 'No revenue margin' : escapeHtml(item.net_contribution_margin_percent) + '% net contribution') + '</small></span>' +
         '</article>'
-      ).join("") : '<div class="empty">Add customer charges and record fuel receipts to calculate shipment contribution.</div>';
+      ).join("") : '<div class="empty">Add customer charges, operating costs, and fuel receipts to calculate shipment net contribution.</div>';
       list.insertAdjacentHTML("beforeend", '<p class="cost-scope">' + escapeHtml(data.cost_scope) + '</p>');
     } catch (error) {
       summary.textContent = "";
