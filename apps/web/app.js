@@ -9,6 +9,7 @@ let routePlansByShipment = new Map();
 
 const headers = () => ({
   "Content-Type": "application/json",
+  "Authorization": "Bearer " + (window.LOGISTICS_ACCESS_TOKEN || ""),
   "X-Organization-Id": ORGANIZATION_ID,
   "X-User-Id": USER_ID,
   "X-User-Role": USER_ROLE,
