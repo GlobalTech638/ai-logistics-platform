@@ -17,6 +17,39 @@
 
 
 
+
+  async function loadShipmentExceptions() {
+    const list = document.querySelector("#shipment-exceptions");
+    if (!list) return;
+    if (!organizationId) {
+      list.innerHTML = '<div class="empty">Configure an organization to monitor shipment SLAs.</div>';
+      return;
+    }
+    try {
+      const response = await fetch(
+        api + "/api/v1/control-tower/" + organizationId + "/shipment-exceptions",
+        { headers: headers() }
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "SLA exception request failed");
+      list.innerHTML = data.exceptions.length ? data.exceptions.map((item) =>
+        '<article class="dispatch-row exception-row" data-shipment-id="' + escapeHtml(item.shipment_id) + '">' +
+          '<div class="dispatch-main"><strong>' + escapeHtml(item.shipment_reference) + '</strong>' +
+          '<small>' + escapeHtml(item.origin) + ' → ' + escapeHtml(item.destination) + '</small>' +
+          '<small>' + (item.minutes_to_due < 0
+            ? Math.abs(item.minutes_to_due) + ' min overdue'
+            : 'Due in ' + item.minutes_to_due + ' min') + '</small></div>' +
+          '<span class="dispatch-state state-' + escapeHtml(item.exception_type) + '">' +
+          escapeHtml(item.exception_type.replaceAll("_", " ")) + '</span>' +
+          '<div class="dispatch-actions"><button class="action-button shipment-timeline" type="button">Timeline</button></div>' +
+        '</article>'
+      ).join("") : '<div class="empty">No pickup or delivery exceptions detected.</div>';
+      list.querySelectorAll(".shipment-timeline").forEach((button) => button.addEventListener("click", loadTimeline));
+    } catch (error) {
+      list.innerHTML = '<div class="empty">SLA monitoring unavailable: ' + escapeHtml(error.message) + '</div>';
+    }
+  }
+
   async function loadRecentShipments() {
     const list = document.querySelector("#recent-shipments");
     if (!list) return;
@@ -274,9 +307,11 @@
     document.querySelector("#timeline-panel").hidden = true;
   });
   document.querySelector("#shipments-refresh")?.addEventListener("click", loadRecentShipments);
+  document.querySelector("#exceptions-refresh")?.addEventListener("click", loadShipmentExceptions);
   document.querySelector("#dispatch-refresh")?.addEventListener("click", loadQueue);
   document.querySelector("#trips-refresh")?.addEventListener("click", loadActiveTrips);
   loadQueue();
   loadActiveTrips();
   loadRecentShipments();
+  loadShipmentExceptions();
 })();
