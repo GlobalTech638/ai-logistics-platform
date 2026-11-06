@@ -10,6 +10,7 @@
     "X-User-Id": window.LOGISTICS_USER_ID || "dashboard-user",
     "X-User-Role": role
   });
+  const commandHeaders = (key) => Object.assign({}, headers(), { "Idempotency-Key": key });
   const escapeHtml = (value) => String(value ?? "")
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -31,9 +32,21 @@
         ["blocked", data.summary.blocked], ["pending", data.total_count]
       ].map(([label, count]) => '<span><strong>' + count + '</strong> ' + label + '</span>').join("");
       list.innerHTML = data.shipments.length ? data.shipments.map((item) => {
-        const actions = item.dispatch_state === "ready" && canExecute
-          ? '<button class="action-button dispatch-candidates" type="button">Find vehicle</button><select class="dispatch-select" disabled aria-label="Eligible vehicle"><option value="">Load candidates</option></select><button class="action-button dispatch-submit" type="button" disabled>Assign</button>'
-          : '<small>' + (item.dispatch_state === "assigned" ? "Vehicle reserved" : item.dispatch_state === "blocked" ? "No eligible vehicle" : "Read-only access") + '</small>';
+        let actions;
+        if (item.dispatch_state === "ready" && canExecute) {
+          actions = '<button class="action-button dispatch-candidates" type="button">Find vehicle</button>' +
+            '<select class="dispatch-select" disabled aria-label="Eligible vehicle"><option value="">Load candidates</option></select>' +
+            '<button class="action-button dispatch-submit" type="button" disabled>Assign</button>';
+        } else if (item.dispatch_state === "assigned" && canExecute && item.assignment_id) {
+          actions = '<div class="trip-start-fields">' +
+            '<small>Reserved: ' + escapeHtml(item.assigned_registration_number || "vehicle") + '</small>' +
+            '<input class="trip-distance" type="number" min="0.1" step="0.1" placeholder="Planned km" aria-label="Planned distance in kilometres">' +
+            '<input class="trip-duration" type="number" min="1" step="1" placeholder="Planned minutes" aria-label="Planned duration in minutes">' +
+            '<input class="trip-start-odometer" type="number" min="0" step="0.1" value="' + escapeHtml(item.assigned_vehicle_odometer_km ?? "") + '" aria-label="Start odometer kilometres">' +
+            '<button class="action-button trip-start" type="button">Start trip</button></div>';
+        } else {
+          actions = '<small>' + (item.dispatch_state === "assigned" ? "Vehicle reserved" : item.dispatch_state === "blocked" ? "No eligible vehicle" : "Read-only access") + '</small>';
+        }
         return '<article class="dispatch-row" data-shipment-id="' + escapeHtml(item.shipment_id) + '">' +
           '<div class="dispatch-main"><strong>' + escapeHtml(item.shipment_reference) + '</strong>' +
           '<small>' + escapeHtml(item.origin) + ' → ' + escapeHtml(item.destination) + ' · ' + item.weight_tonnes + ' t</small></div>' +
@@ -42,6 +55,7 @@
       }).join("") : '<div class="empty">No pending shipments.</div>';
       list.querySelectorAll(".dispatch-candidates").forEach((button) => button.addEventListener("click", findCandidates));
       list.querySelectorAll(".dispatch-submit").forEach((button) => button.addEventListener("click", assignVehicle));
+      list.querySelectorAll(".trip-start").forEach((button) => button.addEventListener("click", startTrip));
     } catch (error) {
       summary.textContent = "";
       list.innerHTML = '<div class="empty">Dispatch queue unavailable: ' + escapeHtml(error.message) + '</div>';
@@ -81,7 +95,7 @@
     try {
       const response = await fetch(api + "/api/v1/operations/" + organizationId + "/shipments/" + row.dataset.shipmentId + "/assign-vehicle", {
         method: "POST",
-        headers: Object.assign({}, headers(), { "Idempotency-Key": crypto.randomUUID() }),
+        headers: commandHeaders(crypto.randomUUID()),
         body: JSON.stringify({ vehicle_id: select.value })
       });
       const data = await response.json();
@@ -94,6 +108,95 @@
     }
   }
 
+  async function startTrip(event) {
+    const row = event.currentTarget.closest(".dispatch-row");
+    const feedback = row.querySelector(".dispatch-feedback");
+    const distance = Number(row.querySelector(".trip-distance").value);
+    const duration = Number(row.querySelector(".trip-duration").value);
+    const odometer = Number(row.querySelector(".trip-start-odometer").value);
+    if (!(distance > 0) || !(duration > 0) || !(odometer >= 0)) {
+      feedback.textContent = "Enter a positive planned distance, planned duration, and valid start odometer.";
+      return;
+    }
+    event.currentTarget.disabled = true;
+    feedback.textContent = "Starting trip…";
+    try {
+      const response = await fetch(api + "/api/v1/operations/" + organizationId + "/shipments/" + row.dataset.shipmentId + "/start-trip", {
+        method: "POST",
+        headers: commandHeaders(crypto.randomUUID()),
+        body: JSON.stringify({
+          planned_distance_km: distance,
+          planned_duration_minutes: Math.round(duration),
+          start_odometer_km: odometer
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Trip start failed");
+      feedback.textContent = "Trip started at " + data.started_at + ".";
+      await loadQueue();
+      await loadActiveTrips();
+    } catch (error) {
+      feedback.textContent = error.message;
+      event.currentTarget.disabled = false;
+    }
+  }
+
+  async function loadActiveTrips() {
+    const list = document.querySelector("#active-trips");
+    if (!list) return;
+    if (!organizationId) {
+      list.innerHTML = '<div class="empty">Configure an organization to load active trips.</div>';
+      return;
+    }
+    try {
+      const response = await fetch(api + "/api/v1/operations/" + organizationId + "/active-trips", { headers: headers() });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Active trip lookup failed");
+      list.innerHTML = data.trips.length ? data.trips.map((trip) =>
+        '<article class="dispatch-row active-trip-row" data-trip-id="' + escapeHtml(trip.trip_id) + '" data-shipment-id="' + escapeHtml(trip.shipment_id) + '">' +
+          '<div class="dispatch-main"><strong>' + escapeHtml(trip.shipment_reference) + '</strong>' +
+          '<small>' + escapeHtml(trip.registration_number) + ' · ' + escapeHtml(trip.origin) + ' → ' + escapeHtml(trip.destination) + '</small>' +
+          '<small>Started ' + escapeHtml(trip.started_at) + ' · start odometer ' + escapeHtml(trip.start_odometer_km) + ' km</small></div>' +
+          '<span class="dispatch-state state-in_progress">in transit</span>' +
+          '<div class="dispatch-actions">' +
+            (canExecute
+              ? '<input class="trip-end-odometer" type="number" min="0" step="0.1" value="' + escapeHtml(trip.current_odometer_km) + '" aria-label="End odometer kilometres">' +
+                '<button class="action-button trip-complete" type="button">Complete trip</button>'
+              : '<small>Read-only access</small>') +
+          '</div><small class="dispatch-feedback" aria-live="polite"></small></article>'
+      ).join("") : '<div class="empty">No trips are currently in transit.</div>';
+      list.querySelectorAll(".trip-complete").forEach((button) => button.addEventListener("click", completeTrip));
+    } catch (error) {
+      list.innerHTML = '<div class="empty">Active trips unavailable: ' + escapeHtml(error.message) + '</div>';
+    }
+  }
+
+  async function completeTrip(event) {
+    const row = event.currentTarget.closest(".active-trip-row");
+    const feedback = row.querySelector(".dispatch-feedback");
+    const endOdometer = Number(row.querySelector(".trip-end-odometer").value);
+    if (!(endOdometer >= 0)) { feedback.textContent = "Enter a valid end odometer."; return; }
+    event.currentTarget.disabled = true;
+    feedback.textContent = "Recording measured completion…";
+    try {
+      const response = await fetch(api + "/api/v1/operations/" + organizationId + "/shipments/" + row.dataset.shipmentId + "/trips/" + row.dataset.tripId + "/complete", {
+        method: "POST",
+        headers: commandHeaders(crypto.randomUUID()),
+        body: JSON.stringify({ end_odometer_km: endOdometer })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Trip completion failed");
+      feedback.textContent = "Delivered · " + data.actual_distance_km + " km · " + data.actual_duration_minutes + " min.";
+      await loadQueue();
+      await loadActiveTrips();
+    } catch (error) {
+      feedback.textContent = error.message;
+      event.currentTarget.disabled = false;
+    }
+  }
+
   document.querySelector("#dispatch-refresh")?.addEventListener("click", loadQueue);
+  document.querySelector("#trips-refresh")?.addEventListener("click", loadActiveTrips);
   loadQueue();
+  loadActiveTrips();
 })();
