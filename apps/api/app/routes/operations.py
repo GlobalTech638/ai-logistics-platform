@@ -952,7 +952,8 @@ def dispatch_queue(
                 )
                 SELECT id, shipment_reference, origin, destination, weight_tonnes,
                        pickup_at, created_at, assigned, eligible_vehicle_count,
-                       assignment_id, assigned_vehicle_id, assigned_registration_number
+                       assignment_id, assigned_vehicle_id, assigned_registration_number,
+                       assigned_vehicle_odometer_km
                 FROM pending_shipments
                 ORDER BY created_at ASC, id ASC
                 LIMIT %s OFFSET %s
