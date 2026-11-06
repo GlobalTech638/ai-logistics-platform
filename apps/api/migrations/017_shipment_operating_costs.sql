@@ -93,4 +93,19 @@ CREATE TRIGGER trg_shipment_operating_cost_idempotency_tenant_immutable
 BEFORE UPDATE OF organization_id ON shipment_operating_cost_idempotency
 FOR EACH ROW EXECUTE FUNCTION prevent_tenant_ownership_change();
 
+ALTER TABLE shipment_events
+    DROP CONSTRAINT IF EXISTS shipment_events_event_type_check;
+ALTER TABLE shipment_events
+    ADD CONSTRAINT shipment_events_event_type_check
+    CHECK (event_type IN (
+        'shipment_created',
+        'vehicle_assigned',
+        'assignment_released',
+        'trip_started',
+        'trip_completed',
+        'fuel_recorded',
+        'revenue_charge_recorded',
+        'operating_cost_recorded'
+    ));
+
 COMMIT;
