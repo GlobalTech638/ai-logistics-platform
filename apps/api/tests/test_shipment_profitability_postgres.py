@@ -72,11 +72,13 @@ def test_shipment_revenue_idempotency_and_currency_safe_profitability():
                     litres, price_per_litre, odometer_km, currency, country_code
                 ) VALUES
                     (%s, %s, %s, %s, 20, 100, 250, 'KES', 'KE'),
-                    (%s, %s, %s, %s, 2, 50, 300, 'USD', 'US')
+                    (%s, %s, %s, %s, 2, 50, 300, 'USD', 'US'),
+                    (%s, %s, NULL, %s, 10, 100, 350, 'KES', 'KE')
                 """,
                 (
                     organization_id, vehicle_id, trip_id, now,
                     organization_id, vehicle_id, trip_id, now,
+                    organization_id, vehicle_id, now,
                 ),
             )
 
