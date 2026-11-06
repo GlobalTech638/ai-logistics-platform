@@ -933,6 +933,17 @@ def trip_performance(
                 "fuel_data_available": fuel_litres > 0,
                 "fuel_costs": [],
             }
+        else:
+            trip = trip_map[trip_id]
+            trip["fuel_litres"] += float(row[11])
+            trip["fuel_data_available"] = trip["fuel_litres"] > 0
+            trip["actual_litres_per_100km"] = round(
+                trip["fuel_litres"] / trip["actual_distance_km"] * 100, 2
+            ) if trip["fuel_data_available"] else None
+            trip["fuel_variance_percent"] = round(
+                (trip["fuel_litres"] - trip["expected_fuel_litres"])
+                / trip["expected_fuel_litres"] * 100, 2
+            ) if trip["fuel_data_available"] and trip["expected_fuel_litres"] > 0 else None
         if row[12] is not None:
             amount = float(row[13] or 0)
             trip_map[trip_id]["fuel_costs"].append({
