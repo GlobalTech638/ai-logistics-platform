@@ -146,8 +146,8 @@ def test_shipment_revenue_idempotency_and_currency_safe_profitability():
         {"currency": "KES", "revenue": 1250, "fuel_cost": 2000, "fuel_contribution": -750},
         {"currency": "USD", "revenue": 300, "fuel_cost": 100, "fuel_contribution": 200},
     ]
-    assert len(data["shipments"]) == 1
-    shipment = data["shipments"][0]
+    assert len(data["shipments"]) == 2
+    shipment = next(item for item in data["shipments"] if item["currency"] == "KES")
     assert shipment["shipment_id"] == str(shipment_id)
     assert shipment["currency"] == "KES"
     assert shipment["revenue_amount"] == 1250
