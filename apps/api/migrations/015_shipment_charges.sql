@@ -27,8 +27,15 @@ CREATE OR REPLACE FUNCTION enforce_shipment_charge_integrity()
 RETURNS trigger LANGUAGE plpgsql AS $guard$
 DECLARE shipment_org UUID;
 BEGIN
- IF TG_OP <> 'INSERT' THEN
+ IF TG_OP = 'UPDATE' THEN
   RAISE EXCEPTION 'Shipment charges are immutable ledger entries' USING ERRCODE = '23514';
+ END IF;
+ IF TG_OP = 'DELETE' THEN
+  PERFORM 1 FROM shipments WHERE id = OLD.shipment_id;
+  IF FOUND THEN
+   RAISE EXCEPTION 'Shipment charges are immutable ledger entries' USING ERRCODE = '23514';
+  END IF;
+  RETURN OLD;
  END IF;
  SELECT organization_id INTO shipment_org FROM shipments WHERE id = NEW.shipment_id;
  IF shipment_org IS NULL OR shipment_org <> NEW.organization_id THEN
