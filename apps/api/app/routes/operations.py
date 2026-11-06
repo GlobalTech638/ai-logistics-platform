@@ -1743,7 +1743,7 @@ def shipment_profitability(
                     FULL OUTER JOIN fuel f
                       ON f.shipment_id = r.shipment_id AND f.currency = r.currency
                 )
-                SELECT s.id, s.shipment_reference, s.origin, s.destination,
+                SELECT s.id AS shipment_id, s.shipment_reference, s.origin, s.destination,
                        s.status, c.currency, c.revenue_amount, c.fuel_amount,
                        c.revenue_amount - c.fuel_amount AS fuel_contribution,
                        CASE WHEN c.revenue_amount > 0
