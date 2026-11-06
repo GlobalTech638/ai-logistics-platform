@@ -310,23 +310,72 @@
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Active trip lookup failed");
       list.innerHTML = data.trips.length ? data.trips.map((trip) =>
-        '<article class="dispatch-row active-trip-row" data-trip-id="' + escapeHtml(trip.trip_id) + '" data-shipment-id="' + escapeHtml(trip.shipment_id) + '">' +
+        '<article class="dispatch-row active-trip-row" data-trip-id="' + escapeHtml(trip.trip_id) + '" data-shipment-id="' + escapeHtml(trip.shipment_id) + '" data-vehicle-id="' + escapeHtml(trip.vehicle_id) + '">' +
           '<div class="dispatch-main"><strong>' + escapeHtml(trip.shipment_reference) + '</strong>' +
           '<small>' + escapeHtml(trip.registration_number) + ' · ' + escapeHtml(trip.origin) + ' → ' + escapeHtml(trip.destination) + '</small>' +
           '<small>Started ' + escapeHtml(trip.started_at) + ' · start odometer ' + escapeHtml(trip.start_odometer_km) + ' km</small></div>' +
           '<span class="dispatch-state state-in_progress">in transit</span>' +
           '<div class="dispatch-actions">' +
             (canExecute
-              ? '<input class="trip-end-odometer" type="number" min="0" step="0.1" value="' + escapeHtml(trip.current_odometer_km) + '" aria-label="End odometer kilometres">' +
+              ? '<div class="trip-fuel-fields">' +
+                  '<input class="fuel-litres" type="number" min="0.01" step="0.01" placeholder="Litres" aria-label="Fuel litres">' +
+                  '<input class="fuel-price" type="number" min="0" step="0.01" placeholder="Price / litre" aria-label="Price per litre">' +
+                  '<input class="fuel-odometer" type="number" min="0" step="0.1" value="' + escapeHtml(trip.current_odometer_km) + '" aria-label="Fuel odometer kilometres">' +
+                  '<input class="fuel-currency" type="text" maxlength="3" value="KES" aria-label="Fuel currency">' +
+                  '<input class="fuel-country" type="text" maxlength="2" value="KE" aria-label="Fuel country code">' +
+                  '<button class="action-button record-fuel" type="button">Record fuel</button></div>' +
+                '<input class="trip-end-odometer" type="number" min="0" step="0.1" value="' + escapeHtml(trip.current_odometer_km) + '" aria-label="End odometer kilometres">' +
                 '<button class="action-button trip-complete" type="button">Complete trip</button>'
               : '<small>Read-only access</small>') +
             '<button class="action-button shipment-timeline" type="button">Timeline</button>' +
           '</div><small class="dispatch-feedback" aria-live="polite"></small></article>'
       ).join("") : '<div class="empty">No trips are currently in transit.</div>';
       list.querySelectorAll(".trip-complete").forEach((button) => button.addEventListener("click", completeTrip));
+      list.querySelectorAll(".record-fuel").forEach((button) => button.addEventListener("click", recordFuel));
       list.querySelectorAll(".shipment-timeline").forEach((button) => button.addEventListener("click", loadTimeline));
     } catch (error) {
       list.innerHTML = '<div class="empty">Active trips unavailable: ' + escapeHtml(error.message) + '</div>';
+    }
+  }
+
+
+  async function recordFuel(event) {
+    const row = event.currentTarget.closest(".active-trip-row");
+    const feedback = row.querySelector(".dispatch-feedback");
+    const litres = Number(row.querySelector(".fuel-litres").value);
+    const price = Number(row.querySelector(".fuel-price").value);
+    const odometer = Number(row.querySelector(".fuel-odometer").value);
+    const currency = row.querySelector(".fuel-currency").value.trim().toUpperCase();
+    const country = row.querySelector(".fuel-country").value.trim().toUpperCase();
+    if (!(litres > 0) || !(price >= 0) || !(odometer >= 0) ||
+        !/^[A-Z]{3}$/.test(currency) || !/^[A-Z]{2}$/.test(country)) {
+      feedback.textContent = "Enter valid litres, price, odometer, 3-letter currency, and 2-letter country code.";
+      return;
+    }
+    event.currentTarget.disabled = true;
+    feedback.textContent = "Recording fuel transaction…";
+    try {
+      const response = await fetch(api + "/api/v1/operations/" + organizationId + "/fuel-transactions", {
+        method: "POST",
+        headers: commandHeaders(crypto.randomUUID()),
+        body: JSON.stringify({
+          vehicle_id: row.dataset.vehicleId,
+          trip_id: row.dataset.tripId,
+          transaction_time: new Date().toISOString(),
+          litres: litres,
+          price_per_litre: price,
+          odometer_km: odometer,
+          currency: currency,
+          country_code: country
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Fuel transaction failed");
+      feedback.textContent = "Recorded " + data.litres + " L · " + data.currency + " " + data.price_per_litre + " per litre.";
+      await loadActiveTrips();
+    } catch (error) {
+      feedback.textContent = error.message;
+      event.currentTarget.disabled = false;
     }
   }
 
