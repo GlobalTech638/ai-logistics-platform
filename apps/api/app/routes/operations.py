@@ -1893,7 +1893,7 @@ def shipment_profitability(
                 FROM combined c
                 JOIN shipments s
                   ON s.id = c.shipment_id AND s.organization_id = %s
-                ORDER BY (c.revenue_amount - c.fuel_amount) ASC,
+                ORDER BY (c.revenue_amount - c.fuel_amount - c.operating_cost_amount) ASC,
                          s.shipment_reference, c.currency
                 LIMIT %s
                 """,
