@@ -3,6 +3,7 @@ import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 from fastapi.encoders import jsonable_encoder
@@ -94,10 +95,37 @@ def _execute_reassignment(
     if previous_vehicle_id == vehicle_id:
         return f"Trip {trip_id} already assigned to vehicle {vehicle_id}"
 
+    # Fast conflict check gives operators a useful 409. The partial unique
+    # index remains the final authority if another transaction races this read.
     cursor.execute(
-        "UPDATE trips SET vehicle_id = %s WHERE id = %s AND organization_id = %s",
-        (vehicle_id, trip_id, organization_id),
+        """
+        SELECT id FROM trips
+        WHERE organization_id = %s
+          AND vehicle_id = %s
+          AND completed_at IS NULL
+          AND id <> %s
+        LIMIT 1
+        FOR UPDATE
+        """,
+        (organization_id, vehicle_id, trip_id),
     )
+    if cursor.fetchone():
+        raise HTTPException(
+            status_code=409,
+            detail="Replacement vehicle already has an unfinished trip",
+        )
+
+    try:
+        cursor.execute(
+            "UPDATE trips SET vehicle_id = %s WHERE id = %s AND organization_id = %s",
+            (vehicle_id, trip_id, organization_id),
+        )
+    except UniqueViolation as exc:
+        # Concurrent assignment won after our availability check.
+        raise HTTPException(
+            status_code=409,
+            detail="Replacement vehicle was assigned to another trip; refresh dispatch candidates",
+        ) from exc
     return f"Trip {trip_id} reassigned from vehicle {previous_vehicle_id} to {vehicle_id}"
 
 
