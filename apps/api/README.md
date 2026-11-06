@@ -70,6 +70,12 @@ Migration 006 adds database triggers that reject cross-organization relationship
 
 The canonical bootstrap schema at `app/db/schema.sql` creates the core operational tables. Organization membership tables are added by migration 007, and lifecycle/integrity constraints are applied by the ordered migrations above. Existing installations must apply every migration in order. Back up the database and test migrations against a staging copy before production rollout.
 
+## Shipment SLA exceptions
+
+`GET /api/v1/control-tower/{organization_id}/shipment-exceptions` returns pending shipments with missed pickup windows and active shipments whose delivery deadline has passed or is within the next two hours. Each result includes the exception type, minutes to or past the relevant deadline, and latest recorded shipment event when available. The Control Tower overview also reports aggregate overdue deliveries, due-soon deliveries, and missed pickups.
+
+The two-hour due-soon window is an initial operational default, not a customer-specific SLA policy. A future tenant configuration layer should own configurable warning thresholds and timezone-aware operating calendars.
+
 ## Dispatch and shipment timeline
 
 The operational API exposes these shipment execution endpoints:
