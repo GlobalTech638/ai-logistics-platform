@@ -198,9 +198,9 @@
           '<div class="dispatch-actions">' +
             (canExecute
               ? '<input class="trip-end-odometer" type="number" min="0" step="0.1" value="' + escapeHtml(trip.current_odometer_km) + '" aria-label="End odometer kilometres">' +
-                '<button class="action-button trip-complete" type="button">Complete trip</button>' +
-                '<button class="action-button shipment-timeline" type="button">Timeline</button>'
+                '<button class="action-button trip-complete" type="button">Complete trip</button>'
               : '<small>Read-only access</small>') +
+            '<button class="action-button shipment-timeline" type="button">Timeline</button>' +
           '</div><small class="dispatch-feedback" aria-live="polite"></small></article>'
       ).join("") : '<div class="empty">No trips are currently in transit.</div>';
       list.querySelectorAll(".trip-complete").forEach((button) => button.addEventListener("click", completeTrip));
