@@ -73,5 +73,11 @@ def test_control_tower_overview_uses_persisted_fleet_and_alert_state():
     assert response.status_code == 200, response.text
     data = response.json()
     assert data["fleet"] == {"total": 2, "active": 1}
-    assert data["shipments"] == {"active": 1, "delivered": 1}
+    assert data["shipments"] == {
+        "active": 1,
+        "delivered": 1,
+        "overdue_deliveries": 0,
+        "due_soon": 0,
+        "missed_pickups": 0,
+    }
     assert data["alerts"] == {"open": 1, "critical": 1, "high": 0, "medium": 0}
