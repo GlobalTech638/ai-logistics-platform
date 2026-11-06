@@ -104,6 +104,49 @@
     }
   }
 
+
+  async function recordShipmentOperatingCost(event) {
+    const button = event.currentTarget;
+    const row = button.closest("[data-shipment-id]");
+    const form = row.querySelector(".shipment-operating-cost-form");
+    const feedback = form.querySelector(".operating-cost-feedback");
+    const amount = Number(form.querySelector(".operating-cost-amount").value);
+    const description = form.querySelector(".operating-cost-description").value.trim();
+    const currency = form.querySelector(".operating-cost-currency").value.trim().toUpperCase();
+    if (!(amount > 0) || !description || !/^[A-Z]{3}$/.test(currency)) {
+      feedback.textContent = "Enter a description, positive amount, and 3-letter currency.";
+      return;
+    }
+    button.disabled = true;
+    feedback.textContent = "Saving operating cost…";
+    try {
+      const response = await fetch(
+        api + "/api/v1/operations/" + organizationId + "/shipments/" +
+        encodeURIComponent(row.dataset.shipmentId) + "/operating-costs",
+        {
+          method: "POST",
+          headers: commandHeaders(crypto.randomUUID()),
+          body: JSON.stringify({
+            cost_type: form.querySelector(".operating-cost-type").value,
+            description,
+            amount,
+            currency
+          })
+        }
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Operating cost could not be saved");
+      feedback.textContent = "Saved " + data.currency + " " + Number(data.amount).toLocaleString();
+      form.querySelector(".operating-cost-description").value = "";
+      form.querySelector(".operating-cost-amount").value = "";
+      await loadProfitability();
+      button.disabled = false;
+    } catch (error) {
+      feedback.textContent = error.message;
+      button.disabled = false;
+    }
+  }
+
   async function loadTripPerformance() {
     const list = document.querySelector("#trip-performance");
     const summary = document.querySelector("#trip-performance-summary");
@@ -191,7 +234,7 @@
       ).join("") : '<div class="empty">No pickup or delivery exceptions detected.</div>';
       list.querySelectorAll(".shipment-timeline").forEach((button) => button.addEventListener("click", loadTimeline));
       list.querySelectorAll(".toggle-charge").forEach((button) => button.addEventListener("click", (event) => {
-        const form = event.currentTarget.closest(".recent-shipment-row").querySelector(".shipment-charge-form");
+        const form = event.currentTarget.closest("[data-shipment-id]").querySelector(".shipment-charge-form");
         form.hidden = !form.hidden;
       }));
       list.querySelectorAll(".save-charge").forEach((button) => button.addEventListener("click", recordShipmentCharge));
@@ -223,10 +266,39 @@
           ' · ' + escapeHtml(shipment.event_count) + ' milestones</small></div>' +
           '<span class="dispatch-state state-' + escapeHtml(shipment.status) + '">' +
           escapeHtml(shipment.status.replaceAll("_", " ")) + '</span>' +
-          '<div class="dispatch-actions"><button class="action-button shipment-timeline" type="button">Timeline</button></div>' +
+          '<div class="dispatch-actions"><button class="action-button shipment-timeline" type="button">Timeline</button>' +
+            (canExecute ? '<button class="action-button toggle-charge" type="button">Add charge</button>' +
+              '<button class="action-button toggle-operating-cost" type="button">Add cost</button>' : '') +
+          '</div>' +
+          (canExecute ? '<div class="shipment-charge-form" hidden>' +
+            '<select class="charge-type" aria-label="Charge type"><option value="transport">Transport</option><option value="handling">Handling</option><option value="fuel_surcharge">Fuel surcharge</option><option value="waiting_time">Waiting time</option><option value="other">Other</option></select>' +
+            '<input class="charge-description" maxlength="500" placeholder="Description" aria-label="Charge description">' +
+            '<input class="charge-amount" type="number" min="0.01" step="0.01" placeholder="Amount" aria-label="Charge amount">' +
+            '<input class="charge-currency" maxlength="3" minlength="3" placeholder="KES" aria-label="Currency">' +
+            '<button class="action-button save-charge" type="button">Save charge</button><small class="charge-feedback" aria-live="polite"></small>' +
+          '</div>' +
+          '<div class="shipment-operating-cost-form" hidden>' +
+            '<select class="operating-cost-type" aria-label="Operating cost type"><option value="driver_allowance">Driver allowance</option><option value="toll">Toll</option><option value="parking">Parking</option><option value="border_fee">Border fee</option><option value="maintenance">Maintenance</option><option value="insurance">Insurance</option><option value="loading">Loading</option><option value="unloading">Unloading</option><option value="other">Other</option></select>' +
+            '<input class="operating-cost-description" maxlength="500" placeholder="Description" aria-label="Cost description">' +
+            '<input class="operating-cost-amount" type="number" min="0.01" step="0.01" placeholder="Amount" aria-label="Cost amount">' +
+            '<input class="operating-cost-currency" maxlength="3" minlength="3" placeholder="KES" aria-label="Cost currency">' +
+            '<button class="action-button save-operating-cost" type="button">Save cost</button><small class="operating-cost-feedback" aria-live="polite"></small>' +
+          '</div>' : '') +
         '</article>'
       ).join("") : '<div class="empty">No shipments recorded yet.</div>';
       list.querySelectorAll(".shipment-timeline").forEach((button) => button.addEventListener("click", loadTimeline));
+      list.querySelectorAll(".toggle-charge").forEach((button) => button.addEventListener("click", (event) => {
+        const row = event.currentTarget.closest("[data-shipment-id]");
+        const form = row.querySelector(".shipment-charge-form");
+        form.hidden = !form.hidden;
+      }));
+      list.querySelectorAll(".save-charge").forEach((button) => button.addEventListener("click", recordShipmentCharge));
+      list.querySelectorAll(".toggle-operating-cost").forEach((button) => button.addEventListener("click", (event) => {
+        const row = event.currentTarget.closest("[data-shipment-id]");
+        const form = row.querySelector(".shipment-operating-cost-form");
+        form.hidden = !form.hidden;
+      }));
+      list.querySelectorAll(".save-operating-cost").forEach((button) => button.addEventListener("click", recordShipmentOperatingCost));
     } catch (error) {
       list.innerHTML = '<div class="empty">Shipment activity unavailable: ' + escapeHtml(error.message) + '</div>';
     }
