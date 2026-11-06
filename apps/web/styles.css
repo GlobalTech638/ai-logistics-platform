@@ -112,3 +112,9 @@ h3 { margin: 8px 0 5px; font-size: 16px; }
   .shipment-charge-form select, .shipment-charge-form input { flex: 1; }
   .shipment-charge-form .charge-description { flex-basis: 100%; }
 }
+
+
+.shipment-operating-cost-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; padding: 10px 0 2px; }
+.shipment-operating-cost-form select, .shipment-operating-cost-form input { min-width: 100px; padding: 8px 10px; border: 1px solid #d8dee3; border-radius: 9px; background: #fff; }
+.shipment-operating-cost-form .operating-cost-description { flex: 1; min-width: 180px; }
+.shipment-operating-cost-form .operating-cost-feedback { flex-basis: 100%; color: #52616b; }
