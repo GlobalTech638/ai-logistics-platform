@@ -966,7 +966,7 @@ def dispatch_queue(
         (
             shipment_id, reference, origin, destination, weight, pickup_at,
             created_at, assigned, eligible_count, assignment_id,
-            assigned_vehicle_id, assigned_registration_number,
+            assigned_vehicle_id, assigned_registration_number, assigned_vehicle_odometer_km,
         ) = row
         dispatch_state = (
             "assigned" if assigned else "ready" if eligible_count > 0 else "blocked"
