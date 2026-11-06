@@ -77,3 +77,13 @@ h3 { margin: 8px 0 5px; font-size: 16px; }
 .state-in_progress { background: #e5edf6; }
 .active-trip-row { grid-template-columns: minmax(220px, 1fr) auto minmax(230px, .8fr); }
 @media (max-width: 800px) { .active-trip-row { grid-template-columns: 1fr; } .trip-start-fields input, .dispatch-actions input { flex: 1; min-width: 100px; } }
+
+
+.timeline-panel[hidden] { display: none; }
+.timeline-list { display: grid; gap: 0; padding: 4px 0 4px 10px; }
+.timeline-event { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 12px; position: relative; padding: 0 0 18px; }
+.timeline-event:not(:last-child)::before { content: ""; position: absolute; left: 6px; top: 15px; bottom: 0; width: 1px; background: #d8e0e5; }
+.timeline-marker { width: 13px; height: 13px; margin-top: 3px; border: 3px solid #9bb8aa; border-radius: 50%; background: #fff; z-index: 1; }
+.timeline-event div { display: grid; gap: 4px; min-width: 0; }
+.timeline-event strong { text-transform: capitalize; color: #25343d; }
+.timeline-event small { color: #687780; overflow-wrap: anywhere; }
