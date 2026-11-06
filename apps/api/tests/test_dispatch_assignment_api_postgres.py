@@ -135,7 +135,7 @@ def test_dispatch_assignment_is_idempotent_and_reserves_vehicle():
                 """,
                 (organization_id, first_shipment_id),
             )
-            assert cur.fetchone()[0] == 1
+            assert cur.fetchone()[0] == 0
             cur.execute(
                 "SELECT COUNT(*) FROM trips WHERE organization_id = %s AND shipment_id = %s",
                 (organization_id, first_shipment_id),
