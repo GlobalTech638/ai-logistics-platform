@@ -30,6 +30,7 @@ Core questions the platform is designed to answer:
 - Control Tower overview metrics and alert lifecycle management.
 - Shipment SLA exception detection for missed pickups, overdue deliveries, and deliveries due within two hours.
 - Completed-trip efficiency analytics using measured odometer distance, actual fuel consumption, and currency-separated fuel costs.
+- Shipment revenue ledger with idempotent customer charge capture and currency-safe fuel contribution reporting.
 - Append-only shipment timeline with migration backfill and recent delivered-shipment visibility.
 - Responsive browser dashboard for operational review and action execution.
 
@@ -69,7 +70,7 @@ Docker Compose is provided at the repository root:
 docker compose up --build
 ```
 
-The migration directory is present under `apps/api/migrations`. `001_initial.sql` currently establishes migration tracking rather than replacing the canonical bootstrap schema. Apply migrations in order after the canonical bootstrap schema: `002_route_plans.sql` adds route-plan persistence, `003_route_plan_invariants.sql` enforces route lifecycle and the one-active-route invariant, `004_recommendation_action_events.sql` adds action audit history, `005_recommendation_action_idempotency.sql` adds execution replay protection, `006_tenant_relationship_integrity.sql` enforces cross-tenant relationship integrity, `007_organization_memberships.sql` adds production membership and membership-audit storage, and `008_one_active_trip_per_vehicle.sql` enforces at most one unfinished trip per vehicle; `009_shipment_vehicle_assignments.sql` separates dispatch reservations from trip telemetry; `010_dispatch_assignment_idempotency.sql` adds replay protection for assignment commands; `011_dispatch_assignment_release_events.sql` adds append-only assignment audit events and release metadata; and `012_trip_execution_lifecycle.sql` adds trip start/completion measurements, audit events, and command idempotency; `013_shipment_timeline_events.sql` adds an append-only, tenant-checked shipment milestone ledger; `014_fuel_transaction_idempotency.sql` adds safe fuel receipt ingestion and fuel-recorded shipment milestones. CI applies migrations 002-014 against PostgreSQL 16 and runs the integration suite.
+The migration directory is present under `apps/api/migrations`. `001_initial.sql` currently establishes migration tracking rather than replacing the canonical bootstrap schema. Apply migrations in order after the canonical bootstrap schema: `002_route_plans.sql` adds route-plan persistence, `003_route_plan_invariants.sql` enforces route lifecycle and the one-active-route invariant, `004_recommendation_action_events.sql` adds action audit history, `005_recommendation_action_idempotency.sql` adds execution replay protection, `006_tenant_relationship_integrity.sql` enforces cross-tenant relationship integrity, `007_organization_memberships.sql` adds production membership and membership-audit storage, and `008_one_active_trip_per_vehicle.sql` enforces at most one unfinished trip per vehicle; `009_shipment_vehicle_assignments.sql` separates dispatch reservations from trip telemetry; `010_dispatch_assignment_idempotency.sql` adds replay protection for assignment commands; `011_dispatch_assignment_release_events.sql` adds append-only assignment audit events and release metadata; and `012_trip_execution_lifecycle.sql` adds trip start/completion measurements, audit events, and command idempotency; `013_shipment_timeline_events.sql` adds an append-only, tenant-checked shipment milestone ledger; `014_fuel_transaction_idempotency.sql` adds safe fuel receipt ingestion and fuel-recorded shipment milestones; `015_shipment_charges.sql` adds an immutable customer revenue ledger and idempotent charge capture. CI applies migrations 002-015 against PostgreSQL 16 and runs the integration suite.
 
 ## API workflow
 
@@ -81,6 +82,7 @@ A typical operational decision flow is:
 4. Rank eligible vehicles, reserve a vehicle for a pending shipment, and start the trip when the vehicle departs.
 5. Record the end odometer to complete the trip; the API derives actual distance and elapsed duration, marks the shipment delivered, and releases the vehicle reservation.
 6. Open the shipment timeline to review its creation, assignment, trip-start, and delivery milestones with actor and event details.
+7. Record customer shipment charges and review currency-separated fuel contribution to identify underpriced or loss-making loads.
 6. Ingest fuel/maintenance events and calculate fleet, corridor, and shipment risk.
 6. Generate explainable recommendations.
 7. Require an authorized operator to approve an executable recommendation.
