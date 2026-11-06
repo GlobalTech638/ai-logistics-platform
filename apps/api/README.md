@@ -92,9 +92,9 @@ The operational API exposes these shipment execution endpoints:
 - `POST /api/v1/operations/{organization_id}/shipments/{shipment_id}/trips/{trip_id}/complete` — complete a trip with the observed end odometer; actual distance and elapsed duration are calculated by the API, and the vehicle reservation is released. Requires an `Idempotency-Key`.
 - `GET /api/v1/operations/{organization_id}/shipments/{shipment_id}/timeline` — read chronological shipment milestones.
 
-Migration `013_shipment_timeline_events.sql` creates an append-only event ledger with tenant-integrity enforcement and backfills creation, assignment, release, and trip milestones for existing records. Migration `014_fuel_transaction_idempotency.sql` adds idempotent fuel receipt writes and the `fuel_recorded` timeline milestone. Migration `015_shipment_charges.sql` adds an immutable, tenant-checked shipment charge ledger and idempotency storage. New API operations append timeline events in the same database transaction as their state changes. Timeline reads are organization-scoped and include actor attribution and event details.
+Migration `013_shipment_timeline_events.sql` creates an append-only event ledger with tenant-integrity enforcement and backfills creation, assignment, release, and trip milestones for existing records. Migration `014_fuel_transaction_idempotency.sql` adds idempotent fuel receipt writes and the `fuel_recorded` timeline milestone. Migration `015_shipment_charges.sql` adds an immutable, tenant-checked shipment charge ledger and idempotency storage. Migration `016_shipment_revenue_timeline.sql` adds revenue-charge milestones to the append-only shipment timeline. New API operations append timeline events in the same database transaction as their state changes. Timeline reads are organization-scoped and include actor attribution and event details.
 
-Apply migrations 013, 014, and 015 after migration 012. CI reapplies migrations 013–015 to verify rerun safety. Existing installations should take a database backup and test the full migration sequence in staging before production rollout.
+Apply migrations 013–016 after migration 012. CI reapplies migrations 013–016 to verify rerun safety. Existing installations should take a database backup and test the full migration sequence in staging before production rollout.
 
 ## Request observability
 
