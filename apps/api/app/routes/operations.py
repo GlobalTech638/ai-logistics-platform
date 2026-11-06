@@ -1246,8 +1246,9 @@ def list_active_trips(
                 SELECT t.id, t.shipment_id, s.shipment_reference, t.vehicle_id,
                        v.registration_number, t.origin, t.destination,
                        t.started_at, t.started_by, t.start_odometer_km,
-                       v.odometer_km
+                       v.odometer_km, o.default_currency, o.country_code
                 FROM trips t
+                JOIN organizations o ON o.id = t.organization_id
                 JOIN shipments s
                   ON s.id = t.shipment_id AND s.organization_id = t.organization_id
                 JOIN vehicles v
@@ -1274,6 +1275,8 @@ def list_active_trips(
                 "started_by": row[8],
                 "start_odometer_km": float(row[9]) if row[9] is not None else None,
                 "current_odometer_km": float(row[10]),
+                "default_currency": row[11].strip(),
+                "country_code": row[12].strip(),
             }
             for row in rows
         ],
