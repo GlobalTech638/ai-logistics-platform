@@ -15,6 +15,41 @@
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 
+
+  async function loadTimeline(event) {
+    const row = event.currentTarget.closest("[data-shipment-id]");
+    const panel = document.querySelector("#timeline-panel");
+    const list = document.querySelector("#shipment-timeline");
+    const title = document.querySelector("#timeline-title");
+    if (!row || !panel || !list) return;
+    panel.hidden = false;
+    list.innerHTML = '<div class="empty">Loading shipment history…</div>';
+    title.textContent = "Shipment timeline";
+    panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    try {
+      const response = await fetch(
+        api + "/api/v1/operations/" + organizationId + "/shipments/" +
+        encodeURIComponent(row.dataset.shipmentId) + "/timeline",
+        { headers: headers() }
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Timeline request failed");
+      title.textContent = data.shipment_reference + " · " + data.status.replaceAll("_", " ");
+      list.innerHTML = data.events.length ? data.events.map((item) =>
+        '<article class="timeline-event">' +
+          '<span class="timeline-marker" aria-hidden="true"></span>' +
+          '<div><strong>' + escapeHtml(item.event_type.replaceAll("_", " ")) + '</strong>' +
+          '<small>' + escapeHtml(new Date(item.occurred_at).toLocaleString()) +
+          (item.actor_id ? " · " + escapeHtml(item.actor_id) : " · historical record") + '</small>' +
+          '<small>' + escapeHtml(Object.entries(item.details || {}).filter(([key]) => key !== "legacy_event")
+            .map(([key, value]) => key.replaceAll("_", " ") + ": " + value).join(" · ")) + '</small></div>' +
+        '</article>'
+      ).join("") : '<div class="empty">No shipment events have been recorded.</div>';
+    } catch (error) {
+      list.innerHTML = '<div class="empty">Shipment history unavailable: ' + escapeHtml(error.message) + '</div>';
+    }
+  }
+
   async function loadQueue() {
     const list = document.querySelector("#dispatch-queue");
     const summary = document.querySelector("#dispatch-summary");
@@ -51,11 +86,13 @@
           '<div class="dispatch-main"><strong>' + escapeHtml(item.shipment_reference) + '</strong>' +
           '<small>' + escapeHtml(item.origin) + ' → ' + escapeHtml(item.destination) + ' · ' + item.weight_tonnes + ' t</small></div>' +
           '<span class="dispatch-state state-' + escapeHtml(item.dispatch_state) + '">' + escapeHtml(item.dispatch_state) + '</span>' +
-          '<div class="dispatch-actions">' + actions + '</div><small class="dispatch-feedback" aria-live="polite"></small></article>';
+          '<div class="dispatch-actions">' + actions + '<button class="action-button shipment-timeline" type="button">Timeline</button></div>' +
+          '<small class="dispatch-feedback" aria-live="polite"></small></article>';
       }).join("") : '<div class="empty">No pending shipments.</div>';
       list.querySelectorAll(".dispatch-candidates").forEach((button) => button.addEventListener("click", findCandidates));
       list.querySelectorAll(".dispatch-submit").forEach((button) => button.addEventListener("click", assignVehicle));
       list.querySelectorAll(".trip-start").forEach((button) => button.addEventListener("click", startTrip));
+      list.querySelectorAll(".shipment-timeline").forEach((button) => button.addEventListener("click", loadTimeline));
     } catch (error) {
       summary.textContent = "";
       list.innerHTML = '<div class="empty">Dispatch queue unavailable: ' + escapeHtml(error.message) + '</div>';
@@ -161,11 +198,13 @@
           '<div class="dispatch-actions">' +
             (canExecute
               ? '<input class="trip-end-odometer" type="number" min="0" step="0.1" value="' + escapeHtml(trip.current_odometer_km) + '" aria-label="End odometer kilometres">' +
-                '<button class="action-button trip-complete" type="button">Complete trip</button>'
+                '<button class="action-button trip-complete" type="button">Complete trip</button>' +
+                '<button class="action-button shipment-timeline" type="button">Timeline</button>'
               : '<small>Read-only access</small>') +
           '</div><small class="dispatch-feedback" aria-live="polite"></small></article>'
       ).join("") : '<div class="empty">No trips are currently in transit.</div>';
       list.querySelectorAll(".trip-complete").forEach((button) => button.addEventListener("click", completeTrip));
+      list.querySelectorAll(".shipment-timeline").forEach((button) => button.addEventListener("click", loadTimeline));
     } catch (error) {
       list.innerHTML = '<div class="empty">Active trips unavailable: ' + escapeHtml(error.message) + '</div>';
     }
@@ -195,6 +234,9 @@
     }
   }
 
+  document.querySelector("#timeline-close")?.addEventListener("click", () => {
+    document.querySelector("#timeline-panel").hidden = true;
+  });
   document.querySelector("#dispatch-refresh")?.addEventListener("click", loadQueue);
   document.querySelector("#trips-refresh")?.addEventListener("click", loadActiveTrips);
   loadQueue();
