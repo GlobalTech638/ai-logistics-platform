@@ -18,7 +18,7 @@ CREATE INDEX IF NOT EXISTS idx_dispatch_assignment_idempotency_created
 CREATE OR REPLACE FUNCTION enforce_dispatch_assignment_idempotency_tenant()
 RETURNS trigger
 LANGUAGE plpgsql
-AS $
+AS $dispatch_tenant$
 DECLARE
     shipment_organization_id UUID;
 BEGIN
@@ -33,7 +33,7 @@ BEGIN
 
     RETURN NEW;
 END;
-$;
+$dispatch_tenant$;
 
 DROP TRIGGER IF EXISTS trg_dispatch_assignment_idempotency_tenant
     ON dispatch_assignment_idempotency;
