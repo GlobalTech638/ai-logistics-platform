@@ -28,7 +28,9 @@ class VehicleCreate(BaseModel):
 
 class DispatchAssignmentCreate(BaseModel):
     vehicle_id: UUID
-\n\nclass ShipmentCreate(BaseModel):
+
+
+class ShipmentCreate(BaseModel):
     shipment_reference: str = Field(min_length=1, max_length=100)
     origin: str = Field(min_length=1, max_length=200)
     destination: str = Field(min_length=1, max_length=200)
@@ -304,7 +306,9 @@ def assign_shipment_vehicle(
             )
 
     return response_body
-\n\n@router.get("/{organization_id}/dispatch-queue")
+
+
+@router.get("/{organization_id}/dispatch-queue")
 def dispatch_queue(
     organization_id: UUID,
     limit: int = Query(default=50, ge=1, le=100),
