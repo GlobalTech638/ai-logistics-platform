@@ -115,7 +115,8 @@ def shipment_exceptions(
                                THEN FLOOR(EXTRACT(EPOCH FROM (s.pickup_at - now())) / 60)::integer
                            ELSE FLOOR(EXTRACT(EPOCH FROM (s.delivery_at - now())) / 60)::integer
                        END AS minutes_to_due,
-                       latest.occurred_at AS last_event_at
+                       latest.occurred_at AS last_event_at,
+                       COUNT(*) OVER() AS total_count
                 FROM shipments s
                 LEFT JOIN LATERAL (
                     SELECT occurred_at
@@ -150,7 +151,8 @@ def shipment_exceptions(
 
     return {
         "organization_id": str(organization_id),
-        "total_count": len(rows),
+        "total_count": int(rows[0][10]) if rows else 0,
+        "returned_count": len(rows),
         "exceptions": [
             {
                 "shipment_id": str(row[0]),
