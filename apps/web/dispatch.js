@@ -63,7 +63,8 @@
   }
 
   async function recordShipmentCharge(event) {
-    const row = event.currentTarget.closest(".recent-shipment-row");
+    const button = event.currentTarget;
+    const row = button.closest(".recent-shipment-row");
     const form = row.querySelector(".shipment-charge-form");
     const feedback = form.querySelector(".charge-feedback");
     const amount = Number(form.querySelector(".charge-amount").value);
@@ -73,7 +74,7 @@
       feedback.textContent = "Enter a description, positive amount, and 3-letter currency.";
       return;
     }
-    event.currentTarget.disabled = true;
+    button.disabled = true;
     feedback.textContent = "Saving charge…";
     try {
       const response = await fetch(
@@ -96,10 +97,10 @@
       form.querySelector(".charge-description").value = "";
       form.querySelector(".charge-amount").value = "";
       await loadProfitability();
-      event.currentTarget.disabled = false;
+      button.disabled = false;
     } catch (error) {
       feedback.textContent = error.message;
-      event.currentTarget.disabled = false;
+      button.disabled = false;
     }
   }
 
