@@ -29,6 +29,7 @@ Core questions the platform is designed to answer:
 - Database-level route-plan lifecycle constraints and one-active-route invariant.
 - Control Tower overview metrics and alert lifecycle management.
 - Shipment SLA exception detection for missed pickups, overdue deliveries, and deliveries due within two hours.
+- Completed-trip efficiency analytics using measured odometer distance, actual fuel consumption, and currency-separated fuel costs.
 - Append-only shipment timeline with migration backfill and recent delivered-shipment visibility.
 - Responsive browser dashboard for operational review and action execution.
 
