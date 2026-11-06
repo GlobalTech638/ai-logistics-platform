@@ -71,7 +71,13 @@ def overview(
     return {
         "organization_id": str(organization_id),
         "fleet": {"total": fleet[0], "active": fleet[1]},
-        "shipments": {"active": shipments[0], "delivered": shipments[1],\n                      "overdue_deliveries": shipments[2], "due_soon": shipments[3],\n                      "missed_pickups": shipments[4]},
+        "shipments": {
+            "active": shipments[0],
+            "delivered": shipments[1],
+            "overdue_deliveries": shipments[2],
+            "due_soon": shipments[3],
+            "missed_pickups": shipments[4],
+        },
         "alerts": {
             "open": alerts[0],
             "critical": alerts[1],
