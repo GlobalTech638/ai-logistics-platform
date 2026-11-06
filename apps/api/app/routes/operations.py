@@ -1682,6 +1682,12 @@ def create_shipment_charge(
                 ),
             )
             charge_id, created_at = cursor.fetchone()
+            record_shipment_event(
+                cursor, organization_id, shipment_id, "revenue_charge_recorded",
+                tenant.user_id,
+                {"charge_id": str(charge_id), "charge_type": payload.charge_type,
+                 "amount": payload.amount, "currency": payload.currency},
+            )
             result = {
                 "charge_id": str(charge_id), "organization_id": str(organization_id),
                 "shipment_id": str(shipment_id), "charge_type": payload.charge_type,
