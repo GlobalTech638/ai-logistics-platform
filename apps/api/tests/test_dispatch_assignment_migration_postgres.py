@@ -70,6 +70,25 @@ def test_dispatch_assignment_migration_is_rerunnable_and_enforces_history():
             (org_id, f"LOAD2-{suffix}"),
         ).fetchone()[0]
 
+        other_shipment_id = conn.execute(
+            """
+            INSERT INTO shipments (organization_id, shipment_reference, origin,
+                                   destination, weight_tonnes)
+            VALUES (%s, %s, 'Nairobi', 'Eldoret', 3) RETURNING id
+            """,
+            (other_org_id, f"OTHER-LOAD-{suffix}"),
+        ).fetchone()[0]
+
+        with pytest.raises(errors.ForeignKeyViolation):
+            conn.execute(
+                """
+                INSERT INTO dispatch_assignment_idempotency (
+                    organization_id, shipment_id, idempotency_key, request_hash, response_body
+                ) VALUES (%s, %s, 'cross-tenant', %s, '{}'::jsonb)
+                """,
+                (org_id, other_shipment_id, "a" * 64),
+            )
+
         assignment_id = conn.execute(
             """
             INSERT INTO shipment_vehicle_assignments
