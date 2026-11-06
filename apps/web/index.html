@@ -49,6 +49,20 @@
       <section class="panel dispatch-panel">
         <div class="panel-head">
           <div>
+            <p class="eyebrow">FLEET EFFICIENCY</p>
+            <h2>Completed trip performance</h2>
+          </div>
+          <button id="performance-refresh" class="action-button" type="button">Refresh performance</button>
+        </div>
+        <div id="trip-performance-summary" class="dispatch-summary"></div>
+        <div id="trip-performance" class="dispatch-list">
+          <div class="empty">Loading measured trip performance…</div>
+        </div>
+      </section>
+
+      <section class="panel dispatch-panel">
+        <div class="panel-head">
+          <div>
             <p class="eyebrow">SLA MONITOR</p>
             <h2>Shipment exceptions</h2>
           </div>
