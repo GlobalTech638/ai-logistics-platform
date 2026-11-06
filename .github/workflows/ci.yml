@@ -53,6 +53,8 @@ jobs:
           done
           # Verify the newest timeline migration is safe to reapply.
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/013_shipment_timeline_events.sql
+          # Verify the fuel ingestion migration is safe to reapply.
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/014_fuel_transaction_idempotency.sql
 
       - name: Run tests
         # API code lives in apps/api while a legacy service package lives at repo root.
