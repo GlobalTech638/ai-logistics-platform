@@ -321,8 +321,8 @@
                   '<input class="fuel-litres" type="number" min="0.01" step="0.01" placeholder="Litres" aria-label="Fuel litres">' +
                   '<input class="fuel-price" type="number" min="0" step="0.01" placeholder="Price / litre" aria-label="Price per litre">' +
                   '<input class="fuel-odometer" type="number" min="0" step="0.1" value="' + escapeHtml(trip.current_odometer_km) + '" aria-label="Fuel odometer kilometres">' +
-                  '<input class="fuel-currency" type="text" maxlength="3" value="KES" aria-label="Fuel currency">' +
-                  '<input class="fuel-country" type="text" maxlength="2" value="KE" aria-label="Fuel country code">' +
+                  '<input class="fuel-currency" type="text" maxlength="3" value="' + escapeHtml(trip.default_currency || "") + '" aria-label="Fuel currency">' +
+                  '<input class="fuel-country" type="text" maxlength="2" value="' + escapeHtml(trip.country_code || "") + '" aria-label="Fuel country code">' +
                   '<button class="action-button record-fuel" type="button">Record fuel</button></div>' +
                 '<input class="trip-end-odometer" type="number" min="0" step="0.1" value="' + escapeHtml(trip.current_odometer_km) + '" aria-label="End odometer kilometres">' +
                 '<button class="action-button trip-complete" type="button">Complete trip</button>'
