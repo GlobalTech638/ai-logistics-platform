@@ -1827,7 +1827,7 @@ def shipment_profitability(
     limit: int = Query(default=50, ge=1, le=200),
     tenant: TenantContext = Depends(get_tenant_context),
 ) -> dict:
-    """Report shipment revenue and direct fuel contribution, grouped by currency."""
+    """Report shipment net contribution after recorded operating costs, grouped by currency."""
     require_org(organization_id, tenant)
     with get_connection() as connection:
         with connection.cursor() as cursor:
