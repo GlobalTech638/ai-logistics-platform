@@ -439,7 +439,8 @@
 
 
   async function recordFuel(event) {
-    const row = event.currentTarget.closest(".active-trip-row");
+    const button = event.currentTarget;
+    const row = button.closest(".active-trip-row");
     const feedback = row.querySelector(".dispatch-feedback");
     const litres = Number(row.querySelector(".fuel-litres").value);
     const price = Number(row.querySelector(".fuel-price").value);
@@ -451,7 +452,7 @@
       feedback.textContent = "Enter valid litres, price, odometer, 3-letter currency, and 2-letter country code.";
       return;
     }
-    event.currentTarget.disabled = true;
+    button.disabled = true;
     feedback.textContent = "Recording fuel transaction…";
     try {
       const response = await fetch(api + "/api/v1/operations/" + organizationId + "/fuel-transactions", {
@@ -473,10 +474,10 @@
       feedback.textContent = "Recorded " + data.litres + " L · " + data.currency + " " + data.price_per_litre + " per litre.";
       row.querySelector(".fuel-odometer").value = data.odometer_km;
       row.querySelector(".trip-end-odometer").value = data.odometer_km;
-      event.currentTarget.disabled = false;
+      button.disabled = false;
     } catch (error) {
       feedback.textContent = error.message;
-      event.currentTarget.disabled = false;
+      button.disabled = false;
     }
   }
 
