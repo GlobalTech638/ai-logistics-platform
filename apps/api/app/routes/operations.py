@@ -904,7 +904,8 @@ def dispatch_queue(
                            s.weight_tonnes, s.pickup_at, s.created_at,
                            assignment.id AS assignment_id,
                            assignment.vehicle_id AS assigned_vehicle_id,
-                           assigned_vehicle.registration_number AS assigned_registration_number,\n                           assigned_vehicle.odometer_km AS assigned_vehicle_odometer_km,
+                           assigned_vehicle.registration_number AS assigned_registration_number,
+                           assigned_vehicle.odometer_km AS assigned_vehicle_odometer_km,
                            EXISTS (
                                SELECT 1 FROM trips t
                                WHERE t.organization_id = s.organization_id
@@ -982,7 +983,8 @@ def dispatch_queue(
             "eligible_vehicle_count": int(eligible_count),
             "assignment_id": str(assignment_id) if assignment_id else None,
             "assigned_vehicle_id": str(assigned_vehicle_id) if assigned_vehicle_id else None,
-            "assigned_registration_number": assigned_registration_number,\n            "assigned_vehicle_odometer_km": float(assigned_vehicle_odometer_km) if assigned_vehicle_odometer_km is not None else None,
+            "assigned_registration_number": assigned_registration_number,
+            "assigned_vehicle_odometer_km": float(assigned_vehicle_odometer_km) if assigned_vehicle_odometer_km is not None else None,
         })
 
     return {
