@@ -85,6 +85,7 @@ The operational API exposes these shipment execution endpoints:
 - `POST /api/v1/operations/{organization_id}/shipments/{shipment_id}/start-trip` — begin execution with planned distance, planned duration, and the observed start odometer; requires an `Idempotency-Key`.
 - `GET /api/v1/operations/{organization_id}/active-trips` — list trips currently in transit.
 - `GET /api/v1/operations/{organization_id}/shipments/recent` — list recent shipments across pending, in-transit, and delivered states.
+- `GET /api/v1/operations/{organization_id}/trip-performance` — compare measured distance and fuel consumption against vehicle baselines, with fuel costs grouped by currency.
 - `POST /api/v1/operations/{organization_id}/shipments/{shipment_id}/trips/{trip_id}/complete` — complete a trip with the observed end odometer; actual distance and elapsed duration are calculated by the API, and the vehicle reservation is released. Requires an `Idempotency-Key`.
 - `GET /api/v1/operations/{organization_id}/shipments/{shipment_id}/timeline` — read chronological shipment milestones.
 
