@@ -16,6 +16,39 @@
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 
 
+
+  async function loadRecentShipments() {
+    const list = document.querySelector("#recent-shipments");
+    if (!list) return;
+    if (!organizationId) {
+      list.innerHTML = '<div class="empty">Configure an organization to load shipment history.</div>';
+      return;
+    }
+    try {
+      const response = await fetch(
+        api + "/api/v1/operations/" + organizationId + "/shipments/recent?limit=25",
+        { headers: headers() }
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Shipment history request failed");
+      list.innerHTML = data.shipments.length ? data.shipments.map((shipment) =>
+        '<article class="dispatch-row recent-shipment-row" data-shipment-id="' + escapeHtml(shipment.shipment_id) + '">' +
+          '<div class="dispatch-main"><strong>' + escapeHtml(shipment.shipment_reference) + '</strong>' +
+          '<small>' + escapeHtml(shipment.origin) + ' → ' + escapeHtml(shipment.destination) + ' · ' +
+          escapeHtml(shipment.weight_tonnes) + ' t</small>' +
+          '<small>Updated ' + escapeHtml(new Date(shipment.last_event_at).toLocaleString()) +
+          ' · ' + escapeHtml(shipment.event_count) + ' milestones</small></div>' +
+          '<span class="dispatch-state state-' + escapeHtml(shipment.status) + '">' +
+          escapeHtml(shipment.status.replaceAll("_", " ")) + '</span>' +
+          '<div class="dispatch-actions"><button class="action-button shipment-timeline" type="button">Timeline</button></div>' +
+        '</article>'
+      ).join("") : '<div class="empty">No shipments recorded yet.</div>';
+      list.querySelectorAll(".shipment-timeline").forEach((button) => button.addEventListener("click", loadTimeline));
+    } catch (error) {
+      list.innerHTML = '<div class="empty">Shipment activity unavailable: ' + escapeHtml(error.message) + '</div>';
+    }
+  }
+
   async function loadTimeline(event) {
     const row = event.currentTarget.closest("[data-shipment-id]");
     const panel = document.querySelector("#timeline-panel");
@@ -139,6 +172,7 @@
       if (!response.ok) throw new Error(data.detail || "Assignment failed");
       feedback.textContent = "Assigned " + data.registration_number + ".";
       await loadQueue();
+      await loadRecentShipments();
     } catch (error) {
       feedback.textContent = error.message;
       event.currentTarget.disabled = false;
@@ -172,6 +206,8 @@
       feedback.textContent = "Trip started at " + data.started_at + ".";
       await loadQueue();
       await loadActiveTrips();
+      await loadRecentShipments();
+      await loadRecentShipments();
     } catch (error) {
       feedback.textContent = error.message;
       event.currentTarget.disabled = false;
@@ -237,8 +273,10 @@
   document.querySelector("#timeline-close")?.addEventListener("click", () => {
     document.querySelector("#timeline-panel").hidden = true;
   });
+  document.querySelector("#shipments-refresh")?.addEventListener("click", loadRecentShipments);
   document.querySelector("#dispatch-refresh")?.addEventListener("click", loadQueue);
   document.querySelector("#trips-refresh")?.addEventListener("click", loadActiveTrips);
   loadQueue();
   loadActiveTrips();
+  loadRecentShipments();
 })();
