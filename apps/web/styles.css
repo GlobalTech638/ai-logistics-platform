@@ -87,3 +87,8 @@ h3 { margin: 8px 0 5px; font-size: 16px; }
 .timeline-event div { display: grid; gap: 4px; min-width: 0; }
 .timeline-event strong { text-transform: capitalize; color: #25343d; }
 .timeline-event small { color: #687780; overflow-wrap: anywhere; }
+
+
+.state-missed_pickup, .state-overdue_delivery { background: #fce9e6; color: #8c3328; }
+.state-delivery_due_soon { background: #fff3d8; color: #805b12; }
+.exception-row { border-left: 3px solid #d89a43; padding-left: 12px; }
