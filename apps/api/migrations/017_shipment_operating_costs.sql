@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS shipment_operating_costs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     shipment_id UUID NOT NULL REFERENCES shipments(id) ON DELETE CASCADE,
-    trip_id UUID,
+    trip_id UUID REFERENCES trips(id),
     cost_type TEXT NOT NULL CHECK (cost_type IN (
         'driver_allowance', 'toll', 'parking', 'border_fee',
         'maintenance', 'insurance', 'loading', 'unloading', 'other'
