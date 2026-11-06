@@ -840,6 +840,115 @@ def complete_shipment_trip(
 
 
 
+
+
+@router.get("/{organization_id}/trip-performance")
+def trip_performance(
+    organization_id: UUID,
+    days: int = Query(default=30, ge=1, le=365),
+    limit: int = Query(default=50, ge=1, le=100),
+    tenant: TenantContext = Depends(get_tenant_context),
+) -> dict:
+    """Measure completed trip efficiency without combining unlike currencies."""
+    require_org(organization_id, tenant)
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT t.id, t.shipment_id, s.shipment_reference,
+                       t.vehicle_id, v.registration_number,
+                       t.origin, t.destination, t.completed_at,
+                       t.actual_distance_km, t.actual_duration_minutes,
+                       v.expected_litres_per_100km,
+                       COALESCE(SUM(ft.litres), 0) AS fuel_litres,
+                       ft.currency,
+                       SUM(ft.litres * ft.price_per_litre) AS fuel_cost
+                FROM trips t
+                JOIN vehicles v
+                  ON v.id = t.vehicle_id AND v.organization_id = t.organization_id
+                LEFT JOIN shipments s
+                  ON s.id = t.shipment_id AND s.organization_id = t.organization_id
+                LEFT JOIN fuel_transactions ft
+                  ON ft.trip_id = t.id
+                 AND ft.organization_id = t.organization_id
+                 AND ft.vehicle_id = t.vehicle_id
+                WHERE t.organization_id = %s
+                  AND t.completed_at >= now() - (%s * INTERVAL '1 day')
+                  AND t.actual_distance_km IS NOT NULL
+                GROUP BY t.id, s.shipment_reference, v.registration_number,
+                         ft.currency
+                ORDER BY t.completed_at DESC, t.id, ft.currency
+                LIMIT %s
+                """,
+                (organization_id, days, limit * 10),
+            )
+            rows = cursor.fetchall()
+
+    trip_map = {}
+    cost_by_currency = {}
+    for row in rows:
+        trip_id = str(row[0])
+        if trip_id not in trip_map:
+            distance = float(row[8])
+            duration = int(row[9]) if row[9] is not None else None
+            expected_rate = float(row[10])
+            fuel_litres = float(row[11])
+            expected_litres = distance * expected_rate / 100
+            trip_map[trip_id] = {
+                "trip_id": trip_id,
+                "shipment_id": str(row[1]) if row[1] else None,
+                "shipment_reference": row[2],
+                "vehicle_id": str(row[3]),
+                "registration_number": row[4],
+                "origin": row[5],
+                "destination": row[6],
+                "completed_at": row[7].isoformat(),
+                "actual_distance_km": distance,
+                "actual_duration_minutes": duration,
+                "fuel_litres": fuel_litres,
+                "expected_fuel_litres": round(expected_litres, 3),
+                "actual_litres_per_100km": round(fuel_litres / distance * 100, 2)
+                    if fuel_litres > 0 and distance > 0 else None,
+                "fuel_variance_percent": round(
+                    (fuel_litres - expected_litres) / expected_litres * 100, 2
+                ) if fuel_litres > 0 and expected_litres > 0 else None,
+                "fuel_data_available": fuel_litres > 0,
+                "fuel_costs": [],
+            }
+        if row[12] is not None:
+            amount = float(row[13] or 0)
+            trip_map[trip_id]["fuel_costs"].append({
+                "currency": row[12].strip(),
+                "amount": round(amount, 2),
+            })
+            cost_by_currency[row[12].strip()] = (
+                cost_by_currency.get(row[12].strip(), 0.0) + amount
+            )
+
+    trips = list(trip_map.values())
+    summary = {
+        "completed_trip_count": len(trips),
+        "actual_distance_km": round(sum(t["actual_distance_km"] for t in trips), 2),
+        "fuel_litres": round(sum(t["fuel_litres"] for t in trips), 2),
+        "expected_fuel_litres": round(sum(t["expected_fuel_litres"] for t in trips), 2),
+        "average_duration_minutes": round(
+            sum(t["actual_duration_minutes"] or 0 for t in trips)
+            / len(trips), 2
+        ) if trips else 0,
+        "fuel_costs_by_currency": [
+            {"currency": currency, "amount": round(amount, 2)}
+            for currency, amount in sorted(cost_by_currency.items())
+        ],
+        "trips_without_fuel_data": sum(1 for t in trips if not t["fuel_data_available"]),
+    }
+    return {
+        "organization_id": str(organization_id),
+        "period_days": days,
+        "returned_count": len(trips),
+        "summary": summary,
+        "trips": trips,
+    }
+
 @router.get("/{organization_id}/shipments/recent")
 def recent_shipments(
     organization_id: UUID,
