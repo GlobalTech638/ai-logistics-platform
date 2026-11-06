@@ -1780,8 +1780,13 @@ def shipment_profitability(
                 fuel AS (
                     SELECT f.currency, SUM(f.litres * f.price_per_litre) AS amount
                     FROM fuel_transactions f
+                    JOIN trips t
+                      ON t.id = f.trip_id
+                     AND t.organization_id = f.organization_id
+                     AND t.vehicle_id = f.vehicle_id
                     WHERE f.organization_id = %s
                       AND f.transaction_time >= now() - (%s * INTERVAL '1 day')
+                      AND t.shipment_id IS NOT NULL
                     GROUP BY f.currency
                 ),
                 currencies AS (
