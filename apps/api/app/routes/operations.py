@@ -45,6 +45,14 @@ class TripComplete(BaseModel):
     end_odometer_km: float = Field(ge=0)
 
 
+class ShipmentChargeCreate(BaseModel):
+    charge_type: str = Field(pattern=r"^(transport|handling|fuel_surcharge|waiting_time|other)$")
+    description: str = Field(min_length=1, max_length=500)
+    amount: float = Field(gt=0)
+    currency: str = Field(min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
+    occurred_at: datetime | None = None
+
+
 class FuelTransactionCreate(BaseModel):
     vehicle_id: UUID
     trip_id: UUID
@@ -1606,3 +1614,193 @@ def dispatch_candidates(
             "note": "Fuel variance uses fuel linked to completed or active trips; maintenance is a rolling 365-day count. Capacity fit rewards right-sized vehicles. Scores rank eligible vehicles and do not guarantee future performance.",
         },
     }
+
+
+@router.post("/{organization_id}/shipments/{shipment_id}/charges")
+def create_shipment_charge(
+    organization_id: UUID,
+    shipment_id: UUID,
+    payload: ShipmentChargeCreate,
+    tenant: TenantContext = Depends(get_tenant_context),
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=200
+    ),
+) -> dict:
+    """Record an immutable customer charge against one shipment."""
+    require_org(organization_id, tenant)
+    if idempotency_key is None:
+        raise HTTPException(status_code=428, detail="Idempotency-Key is required to record shipment revenue")
+    occurred_at = payload.occurred_at or datetime.now().astimezone()
+    request_hash = hashlib.sha256(json.dumps(
+        {"operation": "create_shipment_charge", "shipment_id": str(shipment_id),
+         **payload.model_dump(mode="json")},
+        sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            require_current_role(
+                cursor, tenant, {"admin", "operations_manager", "fleet_manager"},
+                "Role is not authorized to record shipment charges",
+            )
+            cursor.execute(
+                "SELECT id FROM shipments WHERE id = %s AND organization_id = %s FOR UPDATE",
+                (shipment_id, organization_id),
+            )
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="Shipment not found")
+            cursor.execute(
+                """
+                SELECT request_hash, response_body
+                FROM shipment_charge_idempotency
+                WHERE organization_id = %s AND shipment_id = %s AND idempotency_key = %s
+                """,
+                (organization_id, shipment_id, idempotency_key),
+            )
+            cached = cursor.fetchone()
+            if cached:
+                if cached[0] != request_hash:
+                    raise HTTPException(status_code=409, detail="Idempotency-Key conflicts with another shipment charge")
+                return cached[1]
+
+            cursor.execute(
+                """
+                INSERT INTO shipment_charges (
+                    organization_id, shipment_id, charge_type, description,
+                    amount, currency, occurred_at, created_by
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, created_at
+                """,
+                (
+                    organization_id, shipment_id, payload.charge_type,
+                    payload.description.strip(), payload.amount, payload.currency,
+                    occurred_at, tenant.user_id,
+                ),
+            )
+            charge_id, created_at = cursor.fetchone()
+            result = {
+                "charge_id": str(charge_id), "organization_id": str(organization_id),
+                "shipment_id": str(shipment_id), "charge_type": payload.charge_type,
+                "description": payload.description.strip(), "amount": payload.amount,
+                "currency": payload.currency, "occurred_at": occurred_at.isoformat(),
+                "created_by": tenant.user_id, "created_at": created_at.isoformat(),
+            }
+            cursor.execute(
+                """
+                INSERT INTO shipment_charge_idempotency (
+                    organization_id, shipment_id, idempotency_key, request_hash, response_body
+                ) VALUES (%s, %s, %s, %s, %s)
+                """,
+                (organization_id, shipment_id, idempotency_key, request_hash, Jsonb(result)),
+            )
+    return result
+
+
+@router.get("/{organization_id}/profitability")
+def shipment_profitability(
+    organization_id: UUID,
+    days: int = Query(default=30, ge=1, le=365),
+    limit: int = Query(default=50, ge=1, le=200),
+    tenant: TenantContext = Depends(get_tenant_context),
+) -> dict:
+    """Report shipment revenue and direct fuel contribution, grouped by currency."""
+    require_org(organization_id, tenant)
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                WITH revenue AS (
+                    SELECT c.shipment_id, c.currency,
+                           SUM(c.amount) AS revenue_amount
+                    FROM shipment_charges c
+                    WHERE c.organization_id = %s
+                      AND c.occurred_at >= now() - (%s * INTERVAL '1 day')
+                    GROUP BY c.shipment_id, c.currency
+                ),
+                fuel AS (
+                    SELECT t.shipment_id, f.currency,
+                           SUM(f.litres * f.price_per_litre) AS fuel_amount
+                    FROM trips t
+                    JOIN fuel_transactions f
+                      ON f.trip_id = t.id
+                     AND f.organization_id = t.organization_id
+                     AND f.vehicle_id = t.vehicle_id
+                    WHERE t.organization_id = %s
+                      AND f.transaction_time >= now() - (%s * INTERVAL '1 day')
+                      AND t.shipment_id IS NOT NULL
+                    GROUP BY t.shipment_id, f.currency
+                ),
+                combined AS (
+                    SELECT COALESCE(r.shipment_id, f.shipment_id) AS shipment_id,
+                           COALESCE(r.currency, f.currency) AS currency,
+                           COALESCE(r.revenue_amount, 0) AS revenue_amount,
+                           COALESCE(f.fuel_amount, 0) AS fuel_amount
+                    FROM revenue r
+                    FULL OUTER JOIN fuel f
+                      ON f.shipment_id = r.shipment_id AND f.currency = r.currency
+                )
+                SELECT s.id, s.shipment_reference, s.origin, s.destination,
+                       s.status, c.currency, c.revenue_amount, c.fuel_amount,
+                       c.revenue_amount - c.fuel_amount AS fuel_contribution,
+                       CASE WHEN c.revenue_amount > 0
+                            THEN ROUND(((c.revenue_amount - c.fuel_amount)
+                                       / c.revenue_amount) * 100, 2)
+                            ELSE NULL END AS fuel_contribution_margin_percent
+                FROM combined c
+                JOIN shipments s
+                  ON s.id = c.shipment_id AND s.organization_id = %s
+                ORDER BY (c.revenue_amount - c.fuel_amount) ASC,
+                         s.shipment_reference, c.currency
+                LIMIT %s
+                """,
+                (organization_id, days, organization_id, days, organization_id, limit),
+            )
+            columns = [item.name for item in cursor.description]
+            shipments = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+            cursor.execute(
+                """
+                WITH revenue AS (
+                    SELECT currency, SUM(amount) AS amount
+                    FROM shipment_charges
+                    WHERE organization_id = %s
+                      AND occurred_at >= now() - (%s * INTERVAL '1 day')
+                    GROUP BY currency
+                ),
+                fuel AS (
+                    SELECT f.currency, SUM(f.litres * f.price_per_litre) AS amount
+                    FROM fuel_transactions f
+                    WHERE f.organization_id = %s
+                      AND f.transaction_time >= now() - (%s * INTERVAL '1 day')
+                    GROUP BY f.currency
+                ),
+                currencies AS (
+                    SELECT currency FROM revenue UNION SELECT currency FROM fuel
+                )
+                SELECT c.currency, COALESCE(r.amount, 0) AS revenue,
+                       COALESCE(f.amount, 0) AS fuel_cost,
+                       COALESCE(r.amount, 0) - COALESCE(f.amount, 0) AS fuel_contribution
+                FROM currencies c
+                LEFT JOIN revenue r USING (currency)
+                LEFT JOIN fuel f USING (currency)
+                ORDER BY c.currency
+                """,
+                (organization_id, days, organization_id, days),
+            )
+            totals = [
+                {"currency": row[0], "revenue": float(row[1]),
+                 "fuel_cost": float(row[2]), "fuel_contribution": float(row[3])}
+                for row in cursor.fetchall()
+            ]
+
+    for item in shipments:
+        for key in ("revenue_amount", "fuel_amount", "fuel_contribution"):
+            item[key] = float(item[key])
+        if item["fuel_contribution_margin_percent"] is not None:
+            item["fuel_contribution_margin_percent"] = float(item["fuel_contribution_margin_percent"])
+    return {
+        "organization_id": str(organization_id), "period_days": days,
+        "currency_totals": totals, "shipments": shipments,
+        "cost_scope": "Direct recorded fuel only; maintenance and overhead are not allocated.",
+    }
+
