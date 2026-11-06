@@ -48,4 +48,19 @@ DROP TRIGGER IF EXISTS trg_shipment_charge_integrity ON shipment_charges;
 CREATE TRIGGER trg_shipment_charge_integrity
 BEFORE INSERT OR UPDATE OR DELETE ON shipment_charges
 FOR EACH ROW EXECUTE FUNCTION enforce_shipment_charge_integrity();
+
+DROP TRIGGER IF EXISTS trg_shipment_charge_idempotency_integrity ON shipment_charge_idempotency;
+CREATE TRIGGER trg_shipment_charge_idempotency_integrity
+BEFORE INSERT OR UPDATE OR DELETE ON shipment_charge_idempotency
+FOR EACH ROW EXECUTE FUNCTION enforce_shipment_charge_integrity();
+
+DROP TRIGGER IF EXISTS trg_shipment_charges_tenant_immutable ON shipment_charges;
+CREATE TRIGGER trg_shipment_charges_tenant_immutable
+BEFORE UPDATE OF organization_id ON shipment_charges
+FOR EACH ROW EXECUTE FUNCTION prevent_tenant_ownership_change();
+
+DROP TRIGGER IF EXISTS trg_shipment_charge_idempotency_tenant_immutable ON shipment_charge_idempotency;
+CREATE TRIGGER trg_shipment_charge_idempotency_tenant_immutable
+BEFORE UPDATE OF organization_id ON shipment_charge_idempotency
+FOR EACH ROW EXECUTE FUNCTION prevent_tenant_ownership_change();
 COMMIT;
