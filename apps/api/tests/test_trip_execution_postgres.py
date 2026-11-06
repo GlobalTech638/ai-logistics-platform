@@ -119,7 +119,7 @@ def test_trip_start_and_completion_are_idempotent_and_release_vehicle():
     assert [item["vehicle_id"] for item in candidates_after_completion.json()["candidates"]] == [str(vehicle_id)]
     assert timeline.status_code == 200, timeline.text
     assert [event["event_type"] for event in timeline.json()["events"]] == [
-        "vehicle_assigned", "trip_started", "trip_completed"
+        "shipment_created", "vehicle_assigned", "trip_started", "trip_completed"
     ]
     assert timeline.json()["status"] == "delivered"
 
