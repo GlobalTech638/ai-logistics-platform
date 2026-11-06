@@ -257,7 +257,6 @@
       feedback.textContent = "Assigned " + data.registration_number + ".";
       await loadQueue();
       await loadRecentShipments();
-      await loadTripPerformance();
     } catch (error) {
       feedback.textContent = error.message;
       event.currentTarget.disabled = false;
@@ -292,7 +291,7 @@
       await loadQueue();
       await loadActiveTrips();
       await loadRecentShipments();
-      await loadRecentShipments();
+      await loadShipmentExceptions();
     } catch (error) {
       feedback.textContent = error.message;
       event.currentTarget.disabled = false;
@@ -349,6 +348,9 @@
       feedback.textContent = "Delivered · " + data.actual_distance_km + " km · " + data.actual_duration_minutes + " min.";
       await loadQueue();
       await loadActiveTrips();
+      await loadRecentShipments();
+      await loadShipmentExceptions();
+      await loadTripPerformance();
     } catch (error) {
       feedback.textContent = error.message;
       event.currentTarget.disabled = false;
