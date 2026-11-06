@@ -81,6 +81,44 @@ def test_dispatch_candidates_exclude_unavailable_and_ineligible_vehicles():
                 (organization_id, busy_id, busy_shipment_id),
             )
 
+            cur.execute(
+                """
+                INSERT INTO trips (
+                    organization_id, vehicle_id, shipment_id, origin, destination,
+                    distance_km, planned_duration_minutes, actual_duration_minutes,
+                    load_tonnes, completed_at
+                ) VALUES (%s, %s, %s, 'Nairobi', 'Thika', 100, 120, 130, 5, now())
+                RETURNING id
+                """,
+                (organization_id, available_id, busy_shipment_id),
+            )
+            completed_trip_id = cur.fetchone()[0]
+
+            cur.execute(
+                """
+                INSERT INTO fuel_transactions (
+                    organization_id, vehicle_id, trip_id, transaction_time,
+                    litres, price_per_litre, odometer_km, currency, country_code
+                ) VALUES
+                    (%s, %s, %s, now(), 10, 180, 1000, 'KES', 'KE'),
+                    (%s, %s, %s, now(), 15, 180, 1000, 'KES', 'KE')
+                """,
+                (
+                    organization_id, available_id, completed_trip_id,
+                    organization_id, available_id, completed_trip_id,
+                ),
+            )
+
+            cur.execute(
+                """
+                INSERT INTO maintenance_events (
+                    organization_id, vehicle_id, service_type, odometer_km,
+                    cost, currency, completed_at
+                ) VALUES (%s, %s, 'scheduled_service', 1000, 5000, 'KES', now())
+                """,
+                (organization_id, available_id),
+            )
+
     token = issue_access_token(
         f"dispatch-operator-{suffix}", str(organization_id), "operations_manager"
     )
@@ -96,6 +134,16 @@ def test_dispatch_candidates_exclude_unavailable_and_ineligible_vehicles():
     assert [item["vehicle_id"] for item in result["candidates"]] == [str(available_id)]
     assert result["candidates"][0]["capacity_tonnes"] == 12
     assert result["candidates"][0]["shipment_weight_tonnes"] == 8
+    candidate = result["candidates"][0]
+    assert candidate["historical_metrics"]["actual_fuel_litres"] == 25
+    assert candidate["historical_metrics"]["expected_fuel_litres"] == 20
+    assert candidate["historical_metrics"]["maintenance_events_last_365_days"] == 1
+    assert candidate["score_breakdown"] == {
+        "fuel_variance_penalty": 5.0,
+        "maintenance_history_penalty": 2,
+        "capacity_fit_penalty": 5.0,
+    }
+    assert candidate["score"] == 88.0
 
     # The candidate endpoint is advisory; it must not create a trip or mutate
     # the shipment while an operator is evaluating options.
