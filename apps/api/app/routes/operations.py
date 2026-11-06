@@ -855,7 +855,8 @@ def recent_shipments(
                 SELECT s.id, s.shipment_reference, s.origin, s.destination,
                        s.weight_tonnes, s.status, s.created_at,
                        COALESCE(MAX(e.occurred_at), s.created_at) AS last_event_at,
-                       COUNT(e.id) AS event_count
+                       COUNT(e.id) AS event_count,
+                       COUNT(*) OVER() AS total_count
                 FROM shipments s
                 LEFT JOIN shipment_events e
                   ON e.organization_id = s.organization_id
@@ -870,7 +871,8 @@ def recent_shipments(
             rows = cursor.fetchall()
     return {
         "organization_id": str(organization_id),
-        "total_count": len(rows),
+        "total_count": int(rows[0][9]) if rows else 0,
+        "returned_count": len(rows),
         "shipments": [
             {
                 "shipment_id": str(row[0]),
