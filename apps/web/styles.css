@@ -92,3 +92,9 @@ h3 { margin: 8px 0 5px; font-size: 16px; }
 .state-missed_pickup, .state-overdue_delivery { background: #fce9e6; color: #8c3328; }
 .state-delivery_due_soon { background: #fff3d8; color: #805b12; }
 .exception-row { border-left: 3px solid #d89a43; padding-left: 12px; }
+
+
+.trip-fuel-fields { display: flex; flex-wrap: wrap; gap: 7px; width: 100%; }
+.trip-fuel-fields input { min-width: 82px; width: 100px; padding: 8px; border: 1px solid #d8dee3; border-radius: 9px; background: #fff; }
+.trip-fuel-fields .fuel-odometer { width: 130px; }
+@media (max-width: 800px) { .trip-fuel-fields input { flex: 1; min-width: 90px; } }
