@@ -53,6 +53,15 @@ class ShipmentChargeCreate(BaseModel):
     occurred_at: datetime | None = None
 
 
+class ShipmentOperatingCostCreate(BaseModel):
+    cost_type: str = Field(pattern=r"^(driver_allowance|toll|parking|border_fee|maintenance|insurance|loading|unloading|other)$")
+    description: str = Field(min_length=1, max_length=500)
+    amount: float = Field(gt=0)
+    currency: str = Field(min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
+    trip_id: UUID | None = None
+    occurred_at: datetime | None = None
+
+
 class FuelTransactionCreate(BaseModel):
     vehicle_id: UUID
     trip_id: UUID
@@ -1698,6 +1707,111 @@ def create_shipment_charge(
             cursor.execute(
                 """
                 INSERT INTO shipment_charge_idempotency (
+                    organization_id, shipment_id, idempotency_key, request_hash, response_body
+                ) VALUES (%s, %s, %s, %s, %s)
+                """,
+                (organization_id, shipment_id, idempotency_key, request_hash, Jsonb(result)),
+            )
+    return result
+
+
+
+
+@router.post("/{organization_id}/shipments/{shipment_id}/operating-costs")
+def create_shipment_operating_cost(
+    organization_id: UUID,
+    shipment_id: UUID,
+    payload: ShipmentOperatingCostCreate,
+    tenant: TenantContext = Depends(get_tenant_context),
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=200
+    ),
+) -> dict:
+    """Record an immutable direct or allocated operating cost for a shipment."""
+    require_org(organization_id, tenant)
+    if idempotency_key is None:
+        raise HTTPException(status_code=428, detail="Idempotency-Key is required to record shipment costs")
+    if payload.occurred_at is not None and (
+        payload.occurred_at.tzinfo is None or payload.occurred_at.utcoffset() is None
+    ):
+        raise HTTPException(status_code=422, detail="occurred_at must include a timezone")
+    occurred_at = payload.occurred_at or datetime.now().astimezone()
+    request_hash = hashlib.sha256(json.dumps(
+        {"operation": "create_shipment_operating_cost", "shipment_id": str(shipment_id),
+         **payload.model_dump(mode="json")},
+        sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            require_current_role(
+                cursor, tenant, {"admin", "operations_manager", "fleet_manager"},
+                "Role is not authorized to record shipment operating costs",
+            )
+            cursor.execute(
+                "SELECT id FROM shipments WHERE id = %s AND organization_id = %s FOR UPDATE",
+                (shipment_id, organization_id),
+            )
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="Shipment not found")
+            cursor.execute(
+                """
+                SELECT request_hash, response_body
+                FROM shipment_operating_cost_idempotency
+                WHERE organization_id = %s AND shipment_id = %s AND idempotency_key = %s
+                """,
+                (organization_id, shipment_id, idempotency_key),
+            )
+            cached = cursor.fetchone()
+            if cached:
+                if cached[0] != request_hash:
+                    raise HTTPException(status_code=409, detail="Idempotency-Key conflicts with another shipment cost")
+                return cached[1]
+
+            if payload.trip_id is not None:
+                cursor.execute(
+                    """
+                    SELECT id FROM trips
+                    WHERE id = %s AND organization_id = %s AND shipment_id = %s
+                    """,
+                    (payload.trip_id, organization_id, shipment_id),
+                )
+                if cursor.fetchone() is None:
+                    raise HTTPException(status_code=422, detail="trip_id must belong to this shipment and organization")
+
+            cursor.execute(
+                """
+                INSERT INTO shipment_operating_costs (
+                    organization_id, shipment_id, trip_id, cost_type,
+                    description, amount, currency, occurred_at, created_by
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, created_at
+                """,
+                (
+                    organization_id, shipment_id, payload.trip_id, payload.cost_type,
+                    payload.description.strip(), payload.amount, payload.currency,
+                    occurred_at, tenant.user_id,
+                ),
+            )
+            cost_id, created_at = cursor.fetchone()
+            record_shipment_event(
+                cursor, organization_id, shipment_id, "operating_cost_recorded",
+                tenant.user_id,
+                {"cost_id": str(cost_id), "cost_type": payload.cost_type,
+                 "amount": payload.amount, "currency": payload.currency,
+                 "trip_id": str(payload.trip_id) if payload.trip_id else None},
+            )
+            result = {
+                "cost_id": str(cost_id), "organization_id": str(organization_id),
+                "shipment_id": str(shipment_id), "trip_id": str(payload.trip_id) if payload.trip_id else None,
+                "cost_type": payload.cost_type, "description": payload.description.strip(),
+                "amount": payload.amount, "currency": payload.currency,
+                "occurred_at": occurred_at.isoformat(), "created_by": tenant.user_id,
+                "created_at": created_at.isoformat(),
+            }
+            cursor.execute(
+                """
+                INSERT INTO shipment_operating_cost_idempotency (
                     organization_id, shipment_id, idempotency_key, request_hash, response_body
                 ) VALUES (%s, %s, %s, %s, %s)
                 """,
