@@ -90,7 +90,7 @@ WHERE NOT EXISTS (
     WHERE e.organization_id = a.organization_id
       AND e.shipment_id = a.shipment_id
       AND e.event_type = 'vehicle_assigned'
-      AND e.occurred_at = a.assigned_at
+      AND e.details->>'assignment_id' = a.id::text
 );
 
 INSERT INTO shipment_events (
@@ -111,7 +111,7 @@ WHERE a.released_at IS NOT NULL
       WHERE e.organization_id = a.organization_id
         AND e.shipment_id = a.shipment_id
         AND e.event_type = 'assignment_released'
-        AND e.occurred_at = a.released_at
+        AND e.details->>'assignment_id' = a.id::text
   );
 
 INSERT INTO shipment_events (
@@ -133,7 +133,7 @@ WHERE t.shipment_id IS NOT NULL
       WHERE e.organization_id = t.organization_id
         AND e.shipment_id = t.shipment_id
         AND e.event_type = 'trip_started'
-        AND e.occurred_at = t.started_at
+        AND e.details->>'trip_id' = t.id::text
   );
 
 INSERT INTO shipment_events (
@@ -157,7 +157,7 @@ WHERE t.shipment_id IS NOT NULL
       WHERE e.organization_id = t.organization_id
         AND e.shipment_id = t.shipment_id
         AND e.event_type = 'trip_completed'
-        AND e.occurred_at = t.completed_at
+        AND e.details->>'trip_id' = t.id::text
   );
 
 COMMIT;
