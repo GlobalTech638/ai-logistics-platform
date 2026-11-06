@@ -54,6 +54,17 @@ class ShipmentCreate(BaseModel):
     status: str = Field(default="pending", min_length=1, max_length=30)
 
 
+def record_shipment_event(cursor, organization_id, shipment_id, event_type, actor_id, details):
+    cursor.execute(
+        """
+        INSERT INTO shipment_events (
+            organization_id, shipment_id, event_type, actor_id, details
+        ) VALUES (%s, %s, %s, %s, %s)
+        """,
+        (organization_id, shipment_id, event_type, actor_id, Jsonb(details)),
+    )
+
+
 def require_org(organization_id: UUID, tenant: TenantContext) -> None:
     if organization_id != tenant.organization_id:
         raise HTTPException(status_code=403, detail="Organization access denied")
@@ -92,7 +103,15 @@ def create_vehicle(
             )
             row = cursor.fetchone()
             columns = [item.name for item in cursor.description]
-            return dict(zip(columns, row))
+            result = dict(zip(columns, row))
+            record_shipment_event(
+                cursor, organization_id, result["id"], "shipment_created",
+                tenant.user_id,
+                {"shipment_reference": result["shipment_reference"],
+                 "origin": result["origin"], "destination": result["destination"],
+                 "weight_tonnes": payload.weight_tonnes},
+            )
+            return result
 
 
 @router.post("/{organization_id}/shipments")
@@ -295,6 +314,12 @@ def assign_shipment_vehicle(
                 ) from exc
 
             assignment_id, assigned_at = cursor.fetchone()
+            record_shipment_event(
+                cursor, organization_id, shipment_id, "vehicle_assigned",
+                tenant.user_id,
+                {"assignment_id": str(assignment_id), "vehicle_id": str(vehicle_id),
+                 "registration_number": registration_number},
+            )
             cursor.execute(
                 """
                 INSERT INTO dispatch_assignment_events (
@@ -412,6 +437,12 @@ def release_shipment_assignment(
                 (tenant.user_id, payload.reason.strip(), assignment_id),
             )
             released_at = cursor.fetchone()[0]
+            record_shipment_event(
+                cursor, organization_id, shipment_id, "assignment_released",
+                tenant.user_id,
+                {"assignment_id": str(assignment_id), "vehicle_id": str(assignment[1]),
+                 "reason": payload.reason.strip()},
+            )
             cursor.execute(
                 """
                 INSERT INTO dispatch_assignment_events (
@@ -567,6 +598,12 @@ def start_shipment_trip(
                 ),
             )
             trip_id, started_at = cursor.fetchone()
+            record_shipment_event(
+                cursor, organization_id, shipment_id, "trip_started",
+                tenant.user_id,
+                {"trip_id": str(trip_id), "vehicle_id": str(vehicle_id),
+                 "start_odometer_km": payload.start_odometer_km},
+            )
             cursor.execute(
                 "UPDATE shipments SET status = 'in_transit' WHERE id = %s AND organization_id = %s",
                 (shipment_id, organization_id),
@@ -749,6 +786,14 @@ def complete_shipment_trip(
                     ),
                 )
 
+            record_shipment_event(
+                cursor, organization_id, shipment_id, "trip_completed",
+                tenant.user_id,
+                {"trip_id": str(trip_id), "vehicle_id": str(vehicle_id),
+                 "actual_distance_km": float(actual_distance),
+                 "actual_duration_minutes": actual_duration,
+                 "end_odometer_km": payload.end_odometer_km},
+            )
             cursor.execute(
                 """
                 INSERT INTO trip_events (
@@ -790,6 +835,59 @@ def complete_shipment_trip(
 
 
 
+
+
+
+@router.get("/{organization_id}/shipments/{shipment_id}/timeline")
+def shipment_timeline(
+    organization_id: UUID,
+    shipment_id: UUID,
+    tenant: TenantContext = Depends(get_tenant_context),
+) -> dict:
+    """Return immutable shipment milestones in chronological order."""
+    require_org(organization_id, tenant)
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT shipment_reference, origin, destination, status, created_at
+                FROM shipments
+                WHERE organization_id = %s AND id = %s
+                """,
+                (organization_id, shipment_id),
+            )
+            shipment = cursor.fetchone()
+            if shipment is None:
+                raise HTTPException(status_code=404, detail="Shipment not found")
+            cursor.execute(
+                """
+                SELECT id, event_type, actor_id, details, occurred_at
+                FROM shipment_events
+                WHERE organization_id = %s AND shipment_id = %s
+                ORDER BY occurred_at ASC, id ASC
+                """,
+                (organization_id, shipment_id),
+            )
+            rows = cursor.fetchall()
+
+    reference, origin, destination, status, created_at = shipment
+    events = [
+        {"event_id": str(row[0]), "event_type": row[1], "actor_id": row[2],
+         "details": row[3], "occurred_at": row[4].isoformat()}
+        for row in rows
+    ]
+    if not any(event["event_type"] == "shipment_created" for event in events):
+        events.insert(0, {
+            "event_id": None, "event_type": "shipment_created", "actor_id": None,
+            "details": {"shipment_reference": reference, "origin": origin,
+                        "destination": destination, "legacy_event": True},
+            "occurred_at": created_at.isoformat(),
+        })
+    return {
+        "organization_id": str(organization_id), "shipment_id": str(shipment_id),
+        "shipment_reference": reference, "status": status,
+        "total_events": len(events), "events": events,
+    }
 
 @router.get("/{organization_id}/active-trips")
 def list_active_trips(
