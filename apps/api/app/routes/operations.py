@@ -285,6 +285,18 @@ def assign_shipment_vehicle(
                 ) from exc
 
             assignment_id, assigned_at = cursor.fetchone()
+            cursor.execute(
+                """
+                INSERT INTO dispatch_assignment_events (
+                    organization_id, assignment_id, shipment_id, vehicle_id,
+                    event_type, actor_id, details
+                ) VALUES (%s, %s, %s, %s, 'assigned', %s, %s)
+                """,
+                (
+                    organization_id, assignment_id, shipment_id, vehicle_id,
+                    tenant.user_id, Jsonb({"registration_number": registration_number}),
+                ),
+            )
             response_body = {
                 "organization_id": str(organization_id),
                 "shipment_id": str(shipment_id),
