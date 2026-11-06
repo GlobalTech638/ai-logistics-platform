@@ -97,6 +97,10 @@ def test_trip_start_and_completion_are_idempotent_and_release_vehicle():
             f"{base}/shipments/{shipment_id}/dispatch-candidates",
             headers=headers,
         )
+        timeline = client.get(
+            f"{base}/shipments/{shipment_id}/timeline",
+            headers=headers,
+        )
 
     assert assignment.status_code == 200, assignment.text
     assert missing_start_key.status_code == 428, missing_start_key.text
@@ -113,6 +117,11 @@ def test_trip_start_and_completion_are_idempotent_and_release_vehicle():
     assert complete_replay.json() == completed.json()
     assert candidates_after_completion.status_code == 200, candidates_after_completion.text
     assert [item["vehicle_id"] for item in candidates_after_completion.json()["candidates"]] == [str(vehicle_id)]
+    assert timeline.status_code == 200, timeline.text
+    assert [event["event_type"] for event in timeline.json()["events"]] == [
+        "vehicle_assigned", "trip_started", "trip_completed"
+    ]
+    assert timeline.json()["status"] == "delivered"
 
     with get_connection() as conn:
         with conn.cursor() as cur:
