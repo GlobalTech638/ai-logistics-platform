@@ -65,29 +65,59 @@ def test_trip_performance_uses_measured_distance_and_keeps_currency_costs_separa
                 (organization_id, vehicle_id, shipment_id, completed_at, completed_at),
             )
             trip_id = cur.fetchone()[0]
-            cur.execute(
-                """
-                INSERT INTO fuel_transactions (
-                    organization_id, vehicle_id, trip_id, transaction_time,
-                    litres, price_per_litre, odometer_km, currency, country_code
-                ) VALUES
-                    (%s, %s, %s, %s, 100, 150, 1250, 'KES', 'KE'),
-                    (%s, %s, %s, %s, 20, 2, 1260, 'USD', 'US')
-                """,
-                (
-                    organization_id, vehicle_id, trip_id, completed_at,
-                    organization_id, vehicle_id, trip_id, completed_at,
-                ),
-            )
 
     token = issue_access_token(
-        f"performance-operator-{suffix}", str(organization_id), "analyst"
+        f"performance-operator-{suffix}", str(organization_id), "operations_manager"
     )
     with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}"}
+        fuel_url = f"/api/v1/operations/{organization_id}/fuel-transactions"
+        kes_payload = {
+            "vehicle_id": str(vehicle_id), "trip_id": str(trip_id),
+            "transaction_time": completed_at.isoformat(), "litres": 100,
+            "price_per_litre": 150, "odometer_km": 1250,
+            "currency": "KES", "country_code": "KE",
+        }
+        usd_payload = {
+            "vehicle_id": str(vehicle_id), "trip_id": str(trip_id),
+            "transaction_time": completed_at.isoformat(), "litres": 20,
+            "price_per_litre": 2, "odometer_km": 1260,
+            "currency": "USD", "country_code": "US",
+        }
+        missing_key = client.post(fuel_url, json=kes_payload, headers=headers)
+        kes = client.post(
+            fuel_url, json=kes_payload,
+            headers={**headers, "Idempotency-Key": f"fuel-kes-{suffix}"},
+        )
+        kes_replay = client.post(
+            fuel_url, json=kes_payload,
+            headers={**headers, "Idempotency-Key": f"fuel-kes-{suffix}"},
+        )
+        conflicting = client.post(
+            fuel_url, json={**kes_payload, "litres": 101},
+            headers={**headers, "Idempotency-Key": f"fuel-kes-{suffix}"},
+        )
+        usd = client.post(
+            fuel_url, json=usd_payload,
+            headers={**headers, "Idempotency-Key": f"fuel-usd-{suffix}"},
+        )
         response = client.get(
             f"/api/v1/operations/{organization_id}/trip-performance?days=30",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=headers,
         )
+        timeline = client.get(
+            f"/api/v1/operations/{organization_id}/shipments/{shipment_id}/timeline",
+            headers=headers,
+        )
+
+    assert missing_key.status_code == 428, missing_key.text
+    assert kes.status_code == 200, kes.text
+    assert kes_replay.status_code == 200, kes_replay.text
+    assert kes_replay.json() == kes.json()
+    assert conflicting.status_code == 409, conflicting.text
+    assert usd.status_code == 200, usd.text
+    assert timeline.status_code == 200, timeline.text
+    assert [event["event_type"] for event in timeline.json()["events"]].count("fuel_recorded") == 2
 
     assert response.status_code == 200, response.text
     data = response.json()
