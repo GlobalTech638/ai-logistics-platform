@@ -103,15 +103,7 @@ def create_vehicle(
             )
             row = cursor.fetchone()
             columns = [item.name for item in cursor.description]
-            result = dict(zip(columns, row))
-            record_shipment_event(
-                cursor, organization_id, result["id"], "shipment_created",
-                tenant.user_id,
-                {"shipment_reference": result["shipment_reference"],
-                 "origin": result["origin"], "destination": result["destination"],
-                 "weight_tonnes": payload.weight_tonnes},
-            )
-            return result
+            return dict(zip(columns, row))
 
 
 @router.post("/{organization_id}/shipments")
@@ -147,7 +139,15 @@ def create_shipment(
             )
             row = cursor.fetchone()
             columns = [item.name for item in cursor.description]
-            return dict(zip(columns, row))
+            result = dict(zip(columns, row))
+            record_shipment_event(
+                cursor, organization_id, result["id"], "shipment_created",
+                tenant.user_id,
+                {"shipment_reference": result["shipment_reference"],
+                 "origin": result["origin"], "destination": result["destination"],
+                 "weight_tonnes": payload.weight_tonnes},
+            )
+            return result
 
 
 @router.get("/{organization_id}/alerts")
