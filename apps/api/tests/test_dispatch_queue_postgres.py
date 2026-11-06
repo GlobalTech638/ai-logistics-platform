@@ -90,6 +90,10 @@ def test_dispatch_queue_classifies_pending_shipments_and_paginates():
             f"/api/v1/operations/{organization_id}/dispatch-queue?limit=1&offset=1",
             headers=headers,
         )
+        empty_page = client.get(
+            f"/api/v1/operations/{organization_id}/dispatch-queue?limit=1&offset=99",
+            headers=headers,
+        )
 
     assert response.status_code == 200, response.text
     payload = response.json()
@@ -107,3 +111,9 @@ def test_dispatch_queue_classifies_pending_shipments_and_paginates():
     assert page_payload["total_count"] == 3
     assert len(page_payload["shipments"]) == 1
     assert page_payload["offset"] == 1
+
+    assert empty_page.status_code == 200, empty_page.text
+    empty_payload = empty_page.json()
+    assert empty_payload["total_count"] == 3
+    assert empty_payload["summary"] == {"ready": 1, "blocked": 1, "assigned": 1}
+    assert empty_payload["shipments"] == []
