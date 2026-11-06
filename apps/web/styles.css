@@ -69,3 +69,11 @@ h3 { margin: 8px 0 5px; font-size: 16px; }
 .dispatch-actions .action-button { padding: 9px 11px; font-size: 12px; white-space: nowrap; }
 .dispatch-feedback { grid-column: 1 / -1; color: #68737d; font-size: 11px; min-height: 14px; }
 @media (max-width: 800px) { .dispatch-row { grid-template-columns: 1fr; } .dispatch-actions { flex-wrap: wrap; } .dispatch-actions select { min-width: 0; } }
+
+
+.trip-start-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.trip-start-fields small { width: 100%; color: #68737d; font-size: 11px; }
+.trip-start-fields input, .dispatch-actions input { min-width: 105px; width: 112px; padding: 9px; border: 1px solid #d8dee3; border-radius: 9px; background: #fff; }
+.state-in_progress { background: #e5edf6; }
+.active-trip-row { grid-template-columns: minmax(220px, 1fr) auto minmax(230px, .8fr); }
+@media (max-width: 800px) { .active-trip-row { grid-template-columns: 1fr; } .trip-start-fields input, .dispatch-actions input { flex: 1; min-width: 100px; } }
