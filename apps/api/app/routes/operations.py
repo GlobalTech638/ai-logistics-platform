@@ -789,6 +789,56 @@ def complete_shipment_trip(
     return response_body
 
 
+
+
+@router.get("/{organization_id}/active-trips")
+def list_active_trips(
+    organization_id: UUID,
+    tenant: TenantContext = Depends(get_tenant_context),
+) -> dict:
+    """List current trips with live odometer context for completion."""
+    require_org(organization_id, tenant)
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT t.id, t.shipment_id, s.shipment_reference, t.vehicle_id,
+                       v.registration_number, t.origin, t.destination,
+                       t.started_at, t.started_by, t.start_odometer_km,
+                       v.odometer_km
+                FROM trips t
+                JOIN shipments s
+                  ON s.id = t.shipment_id AND s.organization_id = t.organization_id
+                JOIN vehicles v
+                  ON v.id = t.vehicle_id AND v.organization_id = t.organization_id
+                WHERE t.organization_id = %s AND t.completed_at IS NULL
+                ORDER BY t.started_at ASC, t.id ASC
+                """,
+                (organization_id,),
+            )
+            rows = cursor.fetchall()
+    return {
+        "organization_id": str(organization_id),
+        "total_count": len(rows),
+        "trips": [
+            {
+                "trip_id": str(row[0]),
+                "shipment_id": str(row[1]),
+                "shipment_reference": row[2],
+                "vehicle_id": str(row[3]),
+                "registration_number": row[4],
+                "origin": row[5],
+                "destination": row[6],
+                "started_at": row[7].isoformat(),
+                "started_by": row[8],
+                "start_odometer_km": float(row[9]) if row[9] is not None else None,
+                "current_odometer_km": float(row[10]),
+            }
+            for row in rows
+        ],
+    }
+
+
 @router.get("/{organization_id}/dispatch-queue")
 def dispatch_queue(
     organization_id: UUID,
@@ -852,6 +902,9 @@ def dispatch_queue(
                 WITH pending_shipments AS (
                     SELECT s.id, s.shipment_reference, s.origin, s.destination,
                            s.weight_tonnes, s.pickup_at, s.created_at,
+                           assignment.id AS assignment_id,
+                           assignment.vehicle_id AS assigned_vehicle_id,
+                           assigned_vehicle.registration_number AS assigned_registration_number,
                            EXISTS (
                                SELECT 1 FROM trips t
                                WHERE t.organization_id = s.organization_id
@@ -883,10 +936,22 @@ def dispatch_queue(
                                  )
                            ) AS eligible_vehicle_count
                     FROM shipments s
+                    LEFT JOIN LATERAL (
+                        SELECT a.id, a.vehicle_id
+                        FROM shipment_vehicle_assignments a
+                        WHERE a.organization_id = s.organization_id
+                          AND a.shipment_id = s.id AND a.released_at IS NULL
+                        ORDER BY a.assigned_at DESC
+                        LIMIT 1
+                    ) assignment ON TRUE
+                    LEFT JOIN vehicles assigned_vehicle
+                      ON assigned_vehicle.id = assignment.vehicle_id
+                     AND assigned_vehicle.organization_id = s.organization_id
                     WHERE s.organization_id = %s AND s.status = 'pending'
                 )
                 SELECT id, shipment_reference, origin, destination, weight_tonnes,
-                       pickup_at, created_at, assigned, eligible_vehicle_count
+                       pickup_at, created_at, assigned, eligible_vehicle_count,
+                       assignment_id, assigned_vehicle_id, assigned_registration_number
                 FROM pending_shipments
                 ORDER BY created_at ASC, id ASC
                 LIMIT %s OFFSET %s
@@ -899,7 +964,8 @@ def dispatch_queue(
     for row in rows:
         (
             shipment_id, reference, origin, destination, weight, pickup_at,
-            created_at, assigned, eligible_count,
+            created_at, assigned, eligible_count, assignment_id,
+            assigned_vehicle_id, assigned_registration_number,
         ) = row
         dispatch_state = (
             "assigned" if assigned else "ready" if eligible_count > 0 else "blocked"
@@ -914,6 +980,9 @@ def dispatch_queue(
             "created_at": created_at.isoformat(),
             "dispatch_state": dispatch_state,
             "eligible_vehicle_count": int(eligible_count),
+            "assignment_id": str(assignment_id) if assignment_id else None,
+            "assigned_vehicle_id": str(assigned_vehicle_id) if assigned_vehicle_id else None,
+            "assigned_registration_number": assigned_registration_number,
         })
 
     return {
