@@ -108,6 +108,22 @@ def test_shipment_revenue_idempotency_and_currency_safe_profitability():
         "currency": "USD",
         "occurred_at": now.isoformat(),
     }
+    operating_cost_payload = {
+        "cost_type": "driver_allowance",
+        "description": "Driver overnight allowance",
+        "amount": 300,
+        "currency": "KES",
+        "trip_id": str(trip_id),
+        "occurred_at": now.isoformat(),
+    }
+    usd_cost_payload = {
+        "cost_type": "border_fee",
+        "description": "Border processing",
+        "amount": 50,
+        "currency": "USD",
+        "trip_id": str(trip_id),
+        "occurred_at": now.isoformat(),
+    }
     with TestClient(app) as client:
         missing_key = client.post(url, json=first_payload, headers=headers)
         first = client.post(
@@ -130,6 +146,24 @@ def test_shipment_revenue_idempotency_and_currency_safe_profitability():
             url, json=usd_payload,
             headers={**headers, "Idempotency-Key": f"usd-charge-{suffix}"},
         )
+        cost_url = f"/api/v1/operations/{organization_id}/shipments/{shipment_id}/operating-costs"
+        missing_cost_key = client.post(cost_url, json=operating_cost_payload, headers=headers)
+        cost = client.post(
+            cost_url, json=operating_cost_payload,
+            headers={**headers, "Idempotency-Key": f"driver-cost-{suffix}"},
+        )
+        cost_replay = client.post(
+            cost_url, json=operating_cost_payload,
+            headers={**headers, "Idempotency-Key": f"driver-cost-{suffix}"},
+        )
+        invalid_trip_cost = client.post(
+            cost_url, json={**operating_cost_payload, "trip_id": str(uuid4())},
+            headers={**headers, "Idempotency-Key": f"bad-trip-cost-{suffix}"},
+        )
+        usd_cost = client.post(
+            cost_url, json=usd_cost_payload,
+            headers={**headers, "Idempotency-Key": f"usd-cost-{suffix}"},
+        )
         profitability = client.get(
             f"/api/v1/operations/{organization_id}/profitability?days=30",
             headers=headers,
@@ -146,14 +180,21 @@ def test_shipment_revenue_idempotency_and_currency_safe_profitability():
     assert conflict.status_code == 409, conflict.text
     assert second.status_code == 200, second.text
     assert usd_charge.status_code == 200, usd_charge.text
+    assert missing_cost_key.status_code == 428, missing_cost_key.text
+    assert cost.status_code == 200, cost.text
+    assert cost_replay.status_code == 200, cost_replay.text
+    assert cost_replay.json() == cost.json()
+    assert invalid_trip_cost.status_code == 422, invalid_trip_cost.text
+    assert usd_cost.status_code == 200, usd_cost.text
     assert profitability.status_code == 200, profitability.text
     assert timeline.status_code == 200, timeline.text
     assert [event["event_type"] for event in timeline.json()["events"]].count("revenue_charge_recorded") == 3
+    assert [event["event_type"] for event in timeline.json()["events"]].count("operating_cost_recorded") == 2
     data = profitability.json()
     assert data["period_days"] == 30
     assert data["currency_totals"] == [
-        {"currency": "KES", "revenue": 1250, "fuel_cost": 2000, "fuel_contribution": -750},
-        {"currency": "USD", "revenue": 300, "fuel_cost": 100, "fuel_contribution": 200},
+        {"currency": "KES", "revenue": 1250, "fuel_cost": 2000, "operating_cost": 300, "net_contribution": -1050},
+        {"currency": "USD", "revenue": 300, "fuel_cost": 100, "operating_cost": 50, "net_contribution": 150},
     ]
     assert len(data["shipments"]) == 2
     shipment = next(item for item in data["shipments"] if item["currency"] == "KES")
@@ -161,9 +202,11 @@ def test_shipment_revenue_idempotency_and_currency_safe_profitability():
     assert shipment["currency"] == "KES"
     assert shipment["revenue_amount"] == 1250
     assert shipment["fuel_amount"] == 2000
+    assert shipment["operating_cost_amount"] == 300
     assert shipment["fuel_contribution"] == -750
-    assert shipment["fuel_contribution_margin_percent"] == -60
-    assert "maintenance and overhead are not allocated" in data["cost_scope"]
+    assert shipment["net_contribution"] == -1050
+    assert shipment["net_contribution_margin_percent"] == -84
+    assert "unallocated costs remain excluded" in data["cost_scope"]
     with pytest.raises(CheckViolation):
         with get_connection() as conn:
             with conn.cursor() as cur:
