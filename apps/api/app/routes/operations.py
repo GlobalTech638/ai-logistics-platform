@@ -30,6 +30,10 @@ class DispatchAssignmentCreate(BaseModel):
     vehicle_id: UUID
 
 
+class DispatchAssignmentRelease(BaseModel):
+    reason: str = Field(default="operator_cancelled", min_length=1, max_length=500)
+
+
 class ShipmentCreate(BaseModel):
     shipment_reference: str = Field(min_length=1, max_length=100)
     origin: str = Field(min_length=1, max_length=200)
@@ -305,6 +309,118 @@ def assign_shipment_vehicle(
                 ),
             )
 
+    return response_body
+
+
+
+
+@router.post("/{organization_id}/shipments/{shipment_id}/assignments/{assignment_id}/release")
+def release_shipment_assignment(
+    organization_id: UUID,
+    shipment_id: UUID,
+    assignment_id: UUID,
+    payload: DispatchAssignmentRelease,
+    tenant: TenantContext = Depends(get_tenant_context),
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=200
+    ),
+) -> dict:
+    """Release a reservation while preserving immutable assignment history."""
+    require_org(organization_id, tenant)
+    if idempotency_key is None:
+        raise HTTPException(status_code=428, detail="Idempotency-Key is required for release")
+
+    request_hash = hashlib.sha256(
+        json.dumps(
+            {"operation": "release", "assignment_id": str(assignment_id),
+             **payload.model_dump()},
+            sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            require_current_role(
+                cursor, tenant, {"admin", "operations_manager", "fleet_manager"},
+                "Role is not authorized to release dispatch assignments",
+            )
+            cursor.execute(
+                "SELECT id FROM shipments WHERE id = %s AND organization_id = %s FOR UPDATE",
+                (shipment_id, organization_id),
+            )
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="Shipment not found")
+
+            cursor.execute(
+                """
+                SELECT request_hash, response_body
+                FROM dispatch_assignment_idempotency
+                WHERE organization_id = %s AND shipment_id = %s AND idempotency_key = %s
+                """,
+                (organization_id, shipment_id, idempotency_key),
+            )
+            cached = cursor.fetchone()
+            if cached:
+                if cached[0] != request_hash:
+                    raise HTTPException(status_code=409, detail="Idempotency-Key conflicts with another dispatch command")
+                return cached[1]
+
+            cursor.execute(
+                """
+                SELECT id, vehicle_id, released_at
+                FROM shipment_vehicle_assignments
+                WHERE id = %s AND organization_id = %s AND shipment_id = %s
+                FOR UPDATE
+                """,
+                (assignment_id, organization_id, shipment_id),
+            )
+            assignment = cursor.fetchone()
+            if assignment is None:
+                raise HTTPException(status_code=404, detail="Assignment not found")
+            if assignment[2] is not None:
+                raise HTTPException(status_code=409, detail="Assignment has already been released")
+
+            cursor.execute(
+                """
+                UPDATE shipment_vehicle_assignments
+                SET released_at = now(), released_by = %s, release_reason = %s
+                WHERE id = %s
+                RETURNING released_at
+                """,
+                (tenant.user_id, payload.reason.strip(), assignment_id),
+            )
+            released_at = cursor.fetchone()[0]
+            cursor.execute(
+                """
+                INSERT INTO dispatch_assignment_events (
+                    organization_id, assignment_id, shipment_id, vehicle_id,
+                    event_type, actor_id, details
+                ) VALUES (%s, %s, %s, %s, 'released', %s, %s)
+                """,
+                (
+                    organization_id, assignment_id, shipment_id, assignment[1],
+                    tenant.user_id, Jsonb({"reason": payload.reason.strip()}),
+                ),
+            )
+            response_body = {
+                "organization_id": str(organization_id),
+                "shipment_id": str(shipment_id),
+                "assignment_id": str(assignment_id),
+                "vehicle_id": str(assignment[1]),
+                "released_by": tenant.user_id,
+                "released_at": released_at.isoformat(),
+                "reason": payload.reason.strip(),
+                "status": "released",
+            }
+            cursor.execute(
+                """
+                INSERT INTO dispatch_assignment_idempotency (
+                    organization_id, shipment_id, idempotency_key,
+                    request_hash, response_body
+                ) VALUES (%s, %s, %s, %s, %s)
+                """,
+                (organization_id, shipment_id, idempotency_key, request_hash, Jsonb(response_body)),
+            )
     return response_body
 
 
