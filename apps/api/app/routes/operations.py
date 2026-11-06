@@ -855,32 +855,50 @@ def trip_performance(
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT t.id, t.shipment_id, s.shipment_reference,
-                       t.vehicle_id, v.registration_number,
+                WITH selected_trips AS (
+                    SELECT t.id, t.shipment_id, s.shipment_reference,
+                           t.vehicle_id, v.registration_number,
+                           t.origin, t.destination, t.completed_at,
+                           t.actual_distance_km, t.actual_duration_minutes,
+                           v.expected_litres_per_100km
+                    FROM trips t
+                    JOIN vehicles v
+                      ON v.id = t.vehicle_id AND v.organization_id = t.organization_id
+                    LEFT JOIN shipments s
+                      ON s.id = t.shipment_id AND s.organization_id = t.organization_id
+                    WHERE t.organization_id = %s
+                      AND t.completed_at >= now() - (%s * INTERVAL '1 day')
+                      AND t.actual_distance_km IS NOT NULL
+                    ORDER BY t.completed_at DESC, t.id
+                    LIMIT %s
+                )
+                SELECT t.id, t.shipment_id, t.shipment_reference,
+                       t.vehicle_id, t.registration_number,
                        t.origin, t.destination, t.completed_at,
                        t.actual_distance_km, t.actual_duration_minutes,
-                       v.expected_litres_per_100km,
-                       COALESCE(SUM(ft.litres), 0) AS fuel_litres,
-                       ft.currency,
-                       SUM(ft.litres * ft.price_per_litre) AS fuel_cost
-                FROM trips t
-                JOIN vehicles v
-                  ON v.id = t.vehicle_id AND v.organization_id = t.organization_id
-                LEFT JOIN shipments s
-                  ON s.id = t.shipment_id AND s.organization_id = t.organization_id
-                LEFT JOIN fuel_transactions ft
-                  ON ft.trip_id = t.id
-                 AND ft.organization_id = t.organization_id
-                 AND ft.vehicle_id = t.vehicle_id
-                WHERE t.organization_id = %s
-                  AND t.completed_at >= now() - (%s * INTERVAL '1 day')
-                  AND t.actual_distance_km IS NOT NULL
-                GROUP BY t.id, s.shipment_reference, v.registration_number,
-                         ft.currency
-                ORDER BY t.completed_at DESC, t.id, ft.currency
-                LIMIT %s
+                       t.expected_litres_per_100km,
+                       COALESCE(SUM(fuel.litres), 0) AS fuel_litres,
+                       fuel.currency,
+                       SUM(fuel.fuel_cost) AS fuel_cost
+                FROM selected_trips t
+                LEFT JOIN LATERAL (
+                    SELECT ft.currency,
+                           SUM(ft.litres) AS litres,
+                           SUM(ft.litres * ft.price_per_litre) AS fuel_cost
+                    FROM fuel_transactions ft
+                    WHERE ft.organization_id = %s
+                      AND ft.trip_id = t.id
+                      AND ft.vehicle_id = t.vehicle_id
+                    GROUP BY ft.currency
+                ) fuel ON TRUE
+                GROUP BY t.id, t.shipment_id, t.shipment_reference,
+                         t.vehicle_id, t.registration_number, t.origin,
+                         t.destination, t.completed_at, t.actual_distance_km,
+                         t.actual_duration_minutes, t.expected_litres_per_100km,
+                         fuel.currency
+                ORDER BY t.completed_at DESC, t.id, fuel.currency
                 """,
-                (organization_id, days, limit * 10),
+                (organization_id, days, limit, organization_id),
             )
             rows = cursor.fetchall()
 
