@@ -94,6 +94,17 @@ def test_dispatch_assignment_is_idempotent_and_reserves_vehicle():
             f"{base}/shipments/{second_shipment_id}/dispatch-candidates",
             headers=headers,
         )
+        release_url = (
+            f"{base}/shipments/{first_shipment_id}/assignments/{first.json()['assignment_id']}/release"
+        )
+        release_headers = {**headers, "Idempotency-Key": f"release-{suffix}"}
+        released = client.post(
+            release_url, json={"reason": "dispatch_plan_changed"}, headers=release_headers
+        )
+        release_replay = client.post(
+            release_url, json={"reason": "dispatch_plan_changed"}, headers=release_headers
+        )
+
 
     assert missing_key.status_code == 428, missing_key.text
     assert first.status_code == 200, first.text
@@ -109,6 +120,10 @@ def test_dispatch_assignment_is_idempotent_and_reserves_vehicle():
     }
     assert candidates.status_code == 200, candidates.text
     assert [item["vehicle_id"] for item in candidates.json()["candidates"]] == [str(second_vehicle_id)]
+    assert released.status_code == 200, released.text
+    assert released.json()["status"] == "released"
+    assert release_replay.status_code == 200, release_replay.text
+    assert release_replay.json() == released.json()
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -126,3 +141,12 @@ def test_dispatch_assignment_is_idempotent_and_reserves_vehicle():
                 (organization_id, first_shipment_id),
             )
             assert cur.fetchone()[0] == 0
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM dispatch_assignment_events
+                WHERE organization_id = %s AND assignment_id = %s
+                  AND event_type = 'released'
+                """,
+                (organization_id, first.json()["assignment_id"]),
+            )
+            assert cur.fetchone()[0] == 1
