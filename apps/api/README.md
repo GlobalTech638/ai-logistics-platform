@@ -70,6 +70,21 @@ Migration 006 adds database triggers that reject cross-organization relationship
 
 The canonical bootstrap schema at `app/db/schema.sql` creates the core operational tables. Organization membership tables are added by migration 007, and lifecycle/integrity constraints are applied by the ordered migrations above. Existing installations must apply every migration in order. Back up the database and test migrations against a staging copy before production rollout.
 
+## Dispatch and shipment timeline
+
+The operational API exposes these shipment execution endpoints:
+
+- `GET /api/v1/operations/{organization_id}/dispatch-queue` — pending shipment readiness and reservation summary.
+- `POST /api/v1/operations/{organization_id}/shipments/{shipment_id}/assign-vehicle` — reserve an eligible vehicle; requires an `Idempotency-Key`.
+- `POST /api/v1/operations/{organization_id}/shipments/{shipment_id}/start-trip` — begin execution with planned distance, planned duration, and the observed start odometer; requires an `Idempotency-Key`.
+- `GET /api/v1/operations/{organization_id}/active-trips` — list trips currently in transit.
+- `POST /api/v1/operations/{organization_id}/shipments/{shipment_id}/trips/{trip_id}/complete` — complete a trip with the observed end odometer; actual distance and elapsed duration are calculated by the API, and the vehicle reservation is released. Requires an `Idempotency-Key`.
+- `GET /api/v1/operations/{organization_id}/shipments/{shipment_id}/timeline` — read chronological shipment milestones.
+
+Migration `013_shipment_timeline_events.sql` creates an append-only event ledger with tenant-integrity enforcement and backfills creation, assignment, release, and trip milestones for existing records. New API operations append timeline events in the same database transaction as their state changes. Timeline reads are organization-scoped and include actor attribution and event details.
+
+Apply migration 013 after migration 012. The CI pipeline reapplies migration 013 to verify rerun safety. Existing installations should take a database backup and test the full migration sequence in staging before production rollout.
+
 ## Request observability
 
 Every HTTP request receives an `X-Request-ID` response header. A caller-provided `X-Request-ID` is accepted only when it contains 1–128 ASCII letters, digits, dots, underscores, colons, or hyphens; otherwise the API generates a UUID. The ID is for correlation only and must never be treated as an authentication credential.
