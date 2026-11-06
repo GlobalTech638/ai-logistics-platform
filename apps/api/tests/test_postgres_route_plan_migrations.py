@@ -46,6 +46,10 @@ def test_route_plan_migrations_are_rerunnable_and_enforce_invariants():
         conn.execute(migration_007, prepare=False)
         conn.execute(migration_007, prepare=False)
 
+        migration_008 = (API_ROOT / "migrations/008_one_active_trip_per_vehicle.sql").read_text()
+        conn.execute(migration_008, prepare=False)
+        conn.execute(migration_008, prepare=False)
+
         organization_id = conn.execute(
             """
             INSERT INTO organizations (name, country_code, default_currency)
@@ -234,4 +238,67 @@ def test_route_plan_migrations_are_rerunnable_and_enforce_invariants():
         conn.execute(
             "UPDATE shipment_route_plans SET status = 'active' WHERE id = %s",
             (planned_plan_id,),
+        )
+
+        # Migration 008 allows only one unfinished trip per vehicle, even
+        # when two dispatch transactions race to create an assignment.
+        test_vehicle_id = conn.execute(
+            """
+            INSERT INTO vehicles (
+                organization_id, registration_number, make, model,
+                expected_litres_per_100km, capacity_tonnes
+            )
+            VALUES (%s, 'ACTIVE-TRIP-VEHICLE', 'Test', 'Truck', 20, 10)
+            RETURNING id
+            """,
+            (organization_id,),
+        ).fetchone()[0]
+        second_shipment_id = conn.execute(
+            """
+            INSERT INTO shipments (
+                organization_id, shipment_reference, origin, destination, weight_tonnes
+            )
+            VALUES (%s, 'ACTIVE-TRIP-SHIPMENT-2', 'Nairobi', 'Kisumu', 2)
+            RETURNING id
+            """,
+            (organization_id,),
+        ).fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO trips (
+                organization_id, vehicle_id, shipment_id, origin, destination,
+                distance_km, planned_duration_minutes, actual_duration_minutes, load_tonnes
+            )
+            VALUES (%s, %s, %s, 'Nairobi', 'Mombasa', 480, 480, 480, 2)
+            """,
+            (organization_id, test_vehicle_id, shipment_id),
+        )
+        with pytest.raises(errors.UniqueViolation):
+            conn.execute(
+                """
+                INSERT INTO trips (
+                    organization_id, vehicle_id, shipment_id, origin, destination,
+                    distance_km, planned_duration_minutes, actual_duration_minutes, load_tonnes
+                )
+                VALUES (%s, %s, %s, 'Nairobi', 'Kisumu', 350, 350, 350, 2)
+                """,
+                (organization_id, test_vehicle_id, second_shipment_id),
+            )
+        # Completing the first trip releases the vehicle for a new assignment.
+        conn.execute(
+            """
+            UPDATE trips SET completed_at = now()
+            WHERE organization_id = %s AND vehicle_id = %s AND completed_at IS NULL
+            """,
+            (organization_id, test_vehicle_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO trips (
+                organization_id, vehicle_id, shipment_id, origin, destination,
+                distance_km, planned_duration_minutes, actual_duration_minutes, load_tonnes
+            )
+            VALUES (%s, %s, %s, 'Nairobi', 'Kisumu', 350, 350, 350, 2)
+            """,
+            (organization_id, test_vehicle_id, second_shipment_id),
         )
