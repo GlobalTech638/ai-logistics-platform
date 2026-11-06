@@ -209,6 +209,10 @@ def test_active_trip_fuel_receipt_advances_odometer_and_rejects_rollback():
         "country_code": "KE",
     }
     with TestClient(app) as client:
+        active = client.get(
+            f"/api/v1/operations/{organization_id}/active-trips",
+            headers=headers,
+        )
         recorded = client.post(
             url, json=payload,
             headers={**headers, "Idempotency-Key": f"active-fuel-{suffix}"},
@@ -222,6 +226,9 @@ def test_active_trip_fuel_receipt_advances_odometer_and_rejects_rollback():
             headers={**headers, "Idempotency-Key": f"active-fuel-rollback-{suffix}"},
         )
 
+    assert active.status_code == 200, active.text
+    assert active.json()["trips"][0]["default_currency"] == "KES"
+    assert active.json()["trips"][0]["country_code"] == "KE"
     assert recorded.status_code == 200, recorded.text
     assert replay.status_code == 200, replay.text
     assert replay.json() == recorded.json()
