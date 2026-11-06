@@ -143,6 +143,42 @@ def dispatch_queue(
             cursor.execute(
                 """
                 WITH pending_shipments AS (
+                    SELECT s.id,
+                           EXISTS (
+                               SELECT 1 FROM trips t
+                               WHERE t.organization_id = s.organization_id
+                                 AND t.shipment_id = s.id
+                                 AND t.completed_at IS NULL
+                           ) AS assigned,
+                           (
+                               SELECT COUNT(*)
+                               FROM vehicles v
+                               WHERE v.organization_id = s.organization_id
+                                 AND v.active IS TRUE
+                                 AND v.capacity_tonnes >= s.weight_tonnes
+                                 AND NOT EXISTS (
+                                     SELECT 1 FROM trips busy
+                                     WHERE busy.organization_id = v.organization_id
+                                       AND busy.vehicle_id = v.id
+                                       AND busy.completed_at IS NULL
+                                 )
+                           ) AS eligible_vehicle_count
+                    FROM shipments s
+                    WHERE s.organization_id = %s AND s.status = 'pending'
+                )
+                SELECT COUNT(*),
+                       COUNT(*) FILTER (WHERE assigned),
+                       COUNT(*) FILTER (WHERE NOT assigned AND eligible_vehicle_count > 0),
+                       COUNT(*) FILTER (WHERE NOT assigned AND eligible_vehicle_count = 0)
+                FROM pending_shipments
+                """,
+                (organization_id,),
+            )
+            total_count, total_assigned, total_ready, total_blocked = cursor.fetchone()
+
+            cursor.execute(
+                """
+                WITH pending_shipments AS (
                     SELECT s.id, s.shipment_reference, s.origin, s.destination,
                            s.weight_tonnes, s.pickup_at, s.created_at,
                            EXISTS (
@@ -165,17 +201,10 @@ def dispatch_queue(
                                  )
                            ) AS eligible_vehicle_count
                     FROM shipments s
-                    WHERE s.organization_id = %s
-                      AND s.status = 'pending'
+                    WHERE s.organization_id = %s AND s.status = 'pending'
                 )
                 SELECT id, shipment_reference, origin, destination, weight_tonnes,
-                       pickup_at, created_at, assigned, eligible_vehicle_count,
-                       COUNT(*) OVER() AS total_count,
-                       COUNT(*) FILTER (WHERE assigned) OVER() AS total_assigned,
-                       COUNT(*) FILTER (WHERE NOT assigned AND eligible_vehicle_count > 0)
-                           OVER() AS total_ready,
-                       COUNT(*) FILTER (WHERE NOT assigned AND eligible_vehicle_count = 0)
-                           OVER() AS total_blocked
+                       pickup_at, created_at, assigned, eligible_vehicle_count
                 FROM pending_shipments
                 ORDER BY created_at ASC, id ASC
                 LIMIT %s OFFSET %s
@@ -185,15 +214,10 @@ def dispatch_queue(
             rows = cursor.fetchall()
 
     shipments = []
-    total_count = rows[0][9] if rows else 0
-    total_assigned = rows[0][10] if rows else 0
-    total_ready = rows[0][11] if rows else 0
-    total_blocked = rows[0][12] if rows else 0
     for row in rows:
         (
             shipment_id, reference, origin, destination, weight, pickup_at,
-            created_at, assigned, eligible_count, _total, _assigned,
-            _ready, _blocked,
+            created_at, assigned, eligible_count,
         ) = row
         dispatch_state = (
             "assigned" if assigned else "ready" if eligible_count > 0 else "blocked"
