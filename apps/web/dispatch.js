@@ -18,6 +18,57 @@
 
 
 
+
+  async function loadTripPerformance() {
+    const list = document.querySelector("#trip-performance");
+    const summary = document.querySelector("#trip-performance-summary");
+    if (!list || !summary) return;
+    if (!organizationId) {
+      list.innerHTML = '<div class="empty">Configure an organization to load trip performance.</div>';
+      return;
+    }
+    try {
+      const response = await fetch(
+        api + "/api/v1/operations/" + organizationId + "/trip-performance?days=30&limit=50",
+        { headers: headers() }
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Trip performance request failed");
+      const costs = data.summary.fuel_costs_by_currency.length
+        ? data.summary.fuel_costs_by_currency.map((item) =>
+            escapeHtml(item.currency) + " " + Number(item.amount).toLocaleString()
+          ).join(" · ")
+        : "No fuel cost records";
+      summary.innerHTML = [
+        ["completed", data.summary.completed_trip_count],
+        ["distance", Number(data.summary.actual_distance_km).toLocaleString() + " km"],
+        ["fuel", Number(data.summary.fuel_litres).toLocaleString() + " L"],
+        ["avg duration", Number(data.summary.average_duration_minutes).toLocaleString() + " min"],
+        ["fuel cost", costs]
+      ].map(([label, value]) => '<span><strong>' + value + '</strong> ' + label + '</span>').join("");
+      list.innerHTML = data.trips.length ? data.trips.map((trip) => {
+        const variance = trip.fuel_variance_percent;
+        const varianceLabel = variance === null
+          ? "Fuel data unavailable"
+          : (variance > 0 ? "+" : "") + variance + "% vs expected";
+        const fuelCosts = trip.fuel_costs.length
+          ? trip.fuel_costs.map((cost) => escapeHtml(cost.currency) + " " + Number(cost.amount).toLocaleString()).join(" · ")
+          : "No recorded fuel cost";
+        return '<article class="dispatch-row performance-row">' +
+          '<div class="dispatch-main"><strong>' + escapeHtml(trip.shipment_reference || "Unlinked trip") + '</strong>' +
+          '<small>' + escapeHtml(trip.registration_number) + ' · ' + escapeHtml(trip.origin) + ' → ' + escapeHtml(trip.destination) + '</small>' +
+          '<small>' + escapeHtml(trip.actual_distance_km) + ' km · ' + escapeHtml(trip.actual_duration_minutes) + ' min</small></div>' +
+          '<span class="dispatch-state ' + (variance !== null && variance > 10 ? "state-overdue_delivery" : "state-delivered") + '">' +
+          escapeHtml(varianceLabel) + '</span>' +
+          '<div class="dispatch-main"><small>Fuel: ' + escapeHtml(trip.fuel_litres) + ' L / ' + escapeHtml(trip.expected_fuel_litres) + ' L expected</small>' +
+          '<small>' + fuelCosts + '</small></div></article>';
+      }).join("") : '<div class="empty">No completed trips with measured distance in the last 30 days.</div>';
+    } catch (error) {
+      summary.textContent = "";
+      list.innerHTML = '<div class="empty">Trip performance unavailable: ' + escapeHtml(error.message) + '</div>';
+    }
+  }
+
   async function loadShipmentExceptions() {
     const list = document.querySelector("#shipment-exceptions");
     if (!list) return;
@@ -206,6 +257,7 @@
       feedback.textContent = "Assigned " + data.registration_number + ".";
       await loadQueue();
       await loadRecentShipments();
+      await loadTripPerformance();
     } catch (error) {
       feedback.textContent = error.message;
       event.currentTarget.disabled = false;
@@ -308,10 +360,12 @@
   });
   document.querySelector("#shipments-refresh")?.addEventListener("click", loadRecentShipments);
   document.querySelector("#exceptions-refresh")?.addEventListener("click", loadShipmentExceptions);
+  document.querySelector("#performance-refresh")?.addEventListener("click", loadTripPerformance);
   document.querySelector("#dispatch-refresh")?.addEventListener("click", loadQueue);
   document.querySelector("#trips-refresh")?.addEventListener("click", loadActiveTrips);
   loadQueue();
   loadActiveTrips();
   loadRecentShipments();
   loadShipmentExceptions();
+  loadTripPerformance();
 })();
