@@ -118,7 +118,7 @@ def test_dispatch_assignment_migration_is_rerunnable_and_enforces_history():
             )
 
         conn.execute(
-            "UPDATE shipment_vehicle_assignments SET released_at = now() WHERE id = %s",
+            "UPDATE shipment_vehicle_assignments SET released_at = now(), released_by = 'operator-1', release_reason = 'operator release' WHERE id = %s",
             (assignment_id,),
         )
         replacement_id = conn.execute(
