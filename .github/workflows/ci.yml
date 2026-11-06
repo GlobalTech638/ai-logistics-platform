@@ -48,7 +48,7 @@ jobs:
 
       - name: Apply database migrations
         run: |
-          for migration in migrations/002_route_plans.sql migrations/003_route_plan_invariants.sql migrations/004_recommendation_action_events.sql migrations/005_recommendation_action_idempotency.sql migrations/006_tenant_relationship_integrity.sql migrations/007_organization_memberships.sql migrations/008_one_active_trip_per_vehicle.sql migrations/009_shipment_vehicle_assignments.sql migrations/010_dispatch_assignment_idempotency.sql migrations/011_dispatch_assignment_release_events.sql migrations/012_trip_execution_lifecycle.sql migrations/013_shipment_timeline_events.sql migrations/014_fuel_transaction_idempotency.sql migrations/015_shipment_charges.sql migrations/016_shipment_revenue_timeline.sql; do
+          for migration in migrations/002_route_plans.sql migrations/003_route_plan_invariants.sql migrations/004_recommendation_action_events.sql migrations/005_recommendation_action_idempotency.sql migrations/006_tenant_relationship_integrity.sql migrations/007_organization_memberships.sql migrations/008_one_active_trip_per_vehicle.sql migrations/009_shipment_vehicle_assignments.sql migrations/010_dispatch_assignment_idempotency.sql migrations/011_dispatch_assignment_release_events.sql migrations/012_trip_execution_lifecycle.sql migrations/013_shipment_timeline_events.sql migrations/014_fuel_transaction_idempotency.sql migrations/015_shipment_charges.sql migrations/016_shipment_revenue_timeline.sql migrations/017_shipment_operating_costs.sql; do
             psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
           done
           # Verify the newest timeline migration is safe to reapply.
@@ -59,6 +59,8 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/015_shipment_charges.sql
           # Verify the shipment revenue timeline migration is safe to reapply.
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/016_shipment_revenue_timeline.sql
+          # Verify shipment operating cost ledger migration is safe to reapply.
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/017_shipment_operating_costs.sql
 
       - name: Run tests
         # API code lives in apps/api while a legacy service package lives at repo root.
