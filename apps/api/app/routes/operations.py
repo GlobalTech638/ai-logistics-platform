@@ -180,8 +180,7 @@ def dispatch_candidates(
                 maintenance_metrics AS (
                     SELECT
                         vehicle_id,
-                        COUNT(*) AS maintenance_events,
-                        COALESCE(SUM(cost), 0) AS maintenance_cost
+                        COUNT(*) AS maintenance_events
                     FROM maintenance_events
                     WHERE organization_id = %s
                       AND completed_at >= now() - INTERVAL '365 days'
@@ -197,7 +196,6 @@ def dispatch_candidates(
                     COALESCE(fm.actual_litres, 0) AS actual_litres,
                     COALESCE(fm.expected_litres, 0) AS expected_litres,
                     COALESCE(mm.maintenance_events, 0) AS maintenance_events,
-                    COALESCE(mm.maintenance_cost, 0) AS maintenance_cost,
                     CASE
                         WHEN COALESCE(fm.expected_litres, 0) > 0
                         THEN GREATEST(
@@ -238,7 +236,7 @@ def dispatch_candidates(
         (
             vehicle_id, registration_number, make, model, capacity_tonnes,
             expected_litres_per_100km, actual_litres, expected_litres,
-            maintenance_events, maintenance_cost, fuel_variance_ratio,
+            maintenance_events, fuel_variance_ratio,
         ) = row
         fuel_penalty = min(float(fuel_variance_ratio or 0) * 20, 30)
         maintenance_penalty = min(int(maintenance_events) * 2, 20)
@@ -262,7 +260,6 @@ def dispatch_candidates(
                 "actual_fuel_litres": float(actual_litres or 0),
                 "expected_fuel_litres": float(expected_litres or 0),
                 "maintenance_events_last_365_days": int(maintenance_events),
-                "maintenance_cost_last_365_days": float(maintenance_cost or 0),
                 "capacity_utilization": round(capacity_utilization, 3),
             },
         })
