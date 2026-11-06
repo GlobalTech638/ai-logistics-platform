@@ -178,3 +178,15 @@ def test_shipment_revenue_idempotency_and_currency_safe_profitability():
                     "DELETE FROM shipment_charges WHERE id = %s",
                     (first.json()["charge_id"],),
                 )
+    with pytest.raises(CheckViolation):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE shipment_charge_idempotency
+                    SET response_body = '{}'::jsonb
+                    WHERE organization_id = %s AND shipment_id = %s
+                      AND idempotency_key = %s
+                    """,
+                    (organization_id, shipment_id, f"revenue-{suffix}"),
+                )
