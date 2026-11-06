@@ -170,7 +170,12 @@ def dispatch_queue(
                 )
                 SELECT id, shipment_reference, origin, destination, weight_tonnes,
                        pickup_at, created_at, assigned, eligible_vehicle_count,
-                       COUNT(*) OVER() AS total_count
+                       COUNT(*) OVER() AS total_count,
+                       COUNT(*) FILTER (WHERE assigned) OVER() AS total_assigned,
+                       COUNT(*) FILTER (WHERE NOT assigned AND eligible_vehicle_count > 0)
+                           OVER() AS total_ready,
+                       COUNT(*) FILTER (WHERE NOT assigned AND eligible_vehicle_count = 0)
+                           OVER() AS total_blocked
                 FROM pending_shipments
                 ORDER BY created_at ASC, id ASC
                 LIMIT %s OFFSET %s
@@ -181,10 +186,14 @@ def dispatch_queue(
 
     shipments = []
     total_count = rows[0][9] if rows else 0
+    total_assigned = rows[0][10] if rows else 0
+    total_ready = rows[0][11] if rows else 0
+    total_blocked = rows[0][12] if rows else 0
     for row in rows:
         (
             shipment_id, reference, origin, destination, weight, pickup_at,
-            created_at, assigned, eligible_count, _total,
+            created_at, assigned, eligible_count, _total, _assigned,
+            _ready, _blocked,
         ) = row
         dispatch_state = (
             "assigned" if assigned else "ready" if eligible_count > 0 else "blocked"
@@ -207,9 +216,9 @@ def dispatch_queue(
         "limit": limit,
         "offset": offset,
         "summary": {
-            "ready": sum(item["dispatch_state"] == "ready" for item in shipments),
-            "blocked": sum(item["dispatch_state"] == "blocked" for item in shipments),
-            "assigned": sum(item["dispatch_state"] == "assigned" for item in shipments),
+            "ready": total_ready,
+            "blocked": total_blocked,
+            "assigned": total_assigned,
         },
         "shipments": shipments,
     }
