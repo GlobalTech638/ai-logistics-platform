@@ -1,5 +1,6 @@
 import hashlib
 import json
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -42,6 +43,17 @@ class TripStart(BaseModel):
 
 class TripComplete(BaseModel):
     end_odometer_km: float = Field(ge=0)
+
+
+class FuelTransactionCreate(BaseModel):
+    vehicle_id: UUID
+    trip_id: UUID
+    transaction_time: datetime
+    litres: float = Field(gt=0)
+    price_per_litre: float = Field(ge=0)
+    odometer_km: float = Field(ge=0)
+    currency: str = Field(min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
+    country_code: str = Field(min_length=2, max_length=2, pattern=r"^[A-Z]{2}$")
 
 
 class ShipmentCreate(BaseModel):
@@ -841,6 +853,148 @@ def complete_shipment_trip(
 
 
 
+
+
+
+@router.post("/{organization_id}/fuel-transactions")
+def create_fuel_transaction(
+    organization_id: UUID,
+    payload: FuelTransactionCreate,
+    tenant: TenantContext = Depends(get_tenant_context),
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=200
+    ),
+) -> dict:
+    """Record a trip-linked fuel purchase with idempotent, tenant-safe writes."""
+    require_org(organization_id, tenant)
+    if idempotency_key is None:
+        raise HTTPException(status_code=428, detail="Idempotency-Key is required to record fuel")
+    if payload.transaction_time.tzinfo is None:
+        raise HTTPException(status_code=422, detail="transaction_time must include a timezone")
+
+    request_hash = hashlib.sha256(
+        json.dumps(
+            {"operation": "create_fuel_transaction", **payload.model_dump(mode="json")},
+            sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            require_current_role(
+                cursor, tenant, {"admin", "operations_manager", "fleet_manager"},
+                "Role is not authorized to record fuel transactions",
+            )
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s), hashtext(%s))",
+                (str(organization_id), idempotency_key),
+            )
+            cursor.execute(
+                """
+                SELECT request_hash, response_body
+                FROM fuel_transaction_idempotency
+                WHERE organization_id = %s AND idempotency_key = %s
+                """,
+                (organization_id, idempotency_key),
+            )
+            cached = cursor.fetchone()
+            if cached:
+                if cached[0] != request_hash:
+                    raise HTTPException(status_code=409, detail="Idempotency-Key conflicts with another fuel transaction")
+                return cached[1]
+
+            cursor.execute(
+                """
+                SELECT id, vehicle_id, shipment_id, completed_at,
+                       start_odometer_km, end_odometer_km
+                FROM trips
+                WHERE id = %s AND organization_id = %s
+                FOR UPDATE
+                """,
+                (payload.trip_id, organization_id),
+            )
+            trip = cursor.fetchone()
+            if trip is None:
+                raise HTTPException(status_code=404, detail="Trip not found")
+            _, trip_vehicle_id, shipment_id, completed_at, start_odometer, end_odometer = trip
+            if trip_vehicle_id != payload.vehicle_id:
+                raise HTTPException(status_code=409, detail="Fuel transaction vehicle does not match the trip")
+            if start_odometer is not None and payload.odometer_km < start_odometer:
+                raise HTTPException(status_code=409, detail="Fuel odometer cannot be below the trip start odometer")
+            if end_odometer is not None and payload.odometer_km > end_odometer:
+                raise HTTPException(status_code=409, detail="Fuel odometer cannot exceed the trip end odometer")
+
+            cursor.execute(
+                """
+                SELECT odometer_km
+                FROM vehicles
+                WHERE id = %s AND organization_id = %s
+                FOR UPDATE
+                """,
+                (payload.vehicle_id, organization_id),
+            )
+            vehicle = cursor.fetchone()
+            if vehicle is None:
+                raise HTTPException(status_code=404, detail="Vehicle not found")
+            if completed_at is None and payload.odometer_km < vehicle[0]:
+                raise HTTPException(status_code=409, detail="Fuel odometer cannot move an active vehicle backwards")
+
+            cursor.execute(
+                """
+                INSERT INTO fuel_transactions (
+                    organization_id, vehicle_id, trip_id, transaction_time,
+                    litres, price_per_litre, odometer_km, currency, country_code
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, created_at
+                """,
+                (
+                    organization_id, payload.vehicle_id, payload.trip_id,
+                    payload.transaction_time, payload.litres, payload.price_per_litre,
+                    payload.odometer_km, payload.currency, payload.country_code,
+                ),
+            )
+            transaction_id, created_at = cursor.fetchone()
+            if completed_at is None:
+                cursor.execute(
+                    """
+                    UPDATE vehicles SET odometer_km = GREATEST(odometer_km, %s)
+                    WHERE id = %s AND organization_id = %s
+                    """,
+                    (payload.odometer_km, payload.vehicle_id, organization_id),
+                )
+
+            response_body = {
+                "organization_id": str(organization_id),
+                "fuel_transaction_id": str(transaction_id),
+                "trip_id": str(payload.trip_id),
+                "vehicle_id": str(payload.vehicle_id),
+                "shipment_id": str(shipment_id) if shipment_id else None,
+                "transaction_time": payload.transaction_time.isoformat(),
+                "litres": payload.litres,
+                "price_per_litre": payload.price_per_litre,
+                "odometer_km": payload.odometer_km,
+                "currency": payload.currency,
+                "country_code": payload.country_code,
+                "created_at": created_at.isoformat(),
+            }
+            cursor.execute(
+                """
+                INSERT INTO fuel_transaction_idempotency (
+                    organization_id, idempotency_key, request_hash, response_body
+                ) VALUES (%s, %s, %s, %s)
+                """,
+                (organization_id, idempotency_key, request_hash, Jsonb(response_body)),
+            )
+            if shipment_id:
+                record_shipment_event(
+                    cursor, organization_id, shipment_id, "fuel_recorded",
+                    tenant.user_id,
+                    {"fuel_transaction_id": str(transaction_id),
+                     "trip_id": str(payload.trip_id), "litres": payload.litres,
+                     "currency": payload.currency, "odometer_km": payload.odometer_km},
+                )
+
+    return response_body
 
 @router.get("/{organization_id}/trip-performance")
 def trip_performance(
