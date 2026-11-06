@@ -98,3 +98,17 @@ h3 { margin: 8px 0 5px; font-size: 16px; }
 .trip-fuel-fields input { min-width: 82px; width: 100px; padding: 8px; border: 1px solid #d8dee3; border-radius: 9px; background: #fff; }
 .trip-fuel-fields .fuel-odometer { width: 130px; }
 @media (max-width: 800px) { .trip-fuel-fields input { flex: 1; min-width: 90px; } }
+
+
+.shipment-charge-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; padding: 10px 0 2px; }
+.shipment-charge-form select, .shipment-charge-form input { min-width: 100px; padding: 8px 10px; border: 1px solid #d8dee3; border-radius: 9px; background: #fff; }
+.shipment-charge-form .charge-description { flex: 1; min-width: 180px; }
+.shipment-charge-form .charge-feedback { flex-basis: 100%; color: #52616b; }
+.cost-scope { width: 100%; margin: 8px 0 0; color: #64727c; font-size: 12px; }
+.profitability-row { align-items: center; }
+.profitability-row .dispatch-state { display: flex; flex-direction: column; gap: 4px; }
+.profitability-row .dispatch-state small { font-size: 11px; font-weight: 500; }
+@media (max-width: 800px) {
+  .shipment-charge-form select, .shipment-charge-form input { flex: 1; }
+  .shipment-charge-form .charge-description { flex-basis: 100%; }
+}
