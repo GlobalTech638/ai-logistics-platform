@@ -127,3 +127,153 @@ def open_alerts(
             )
             columns = [item.name for item in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+@router.get("/{organization_id}/shipments/{shipment_id}/dispatch-candidates")
+def dispatch_candidates(
+    organization_id: UUID,
+    shipment_id: UUID,
+    tenant: TenantContext = Depends(get_tenant_context),
+) -> dict:
+    """Return explainable, currently available vehicle candidates for a shipment."""
+    require_org(organization_id, tenant)
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT weight_tonnes, shipment_reference
+                FROM shipments
+                WHERE id = %s AND organization_id = %s
+                """,
+                (shipment_id, organization_id),
+            )
+            shipment = cursor.fetchone()
+            if shipment is None:
+                raise HTTPException(status_code=404, detail="Shipment not found")
+
+            shipment_weight, shipment_reference = shipment
+            cursor.execute(
+                """
+                WITH fuel_metrics AS (
+                    SELECT
+                        t.vehicle_id,
+                        SUM(f.litres) AS actual_litres,
+                        SUM((t.distance_km / 100.0) * v.expected_litres_per_100km)
+                            AS expected_litres
+                    FROM trips t
+                    JOIN vehicles v
+                      ON v.id = t.vehicle_id
+                     AND v.organization_id = t.organization_id
+                    JOIN fuel_transactions f
+                      ON f.trip_id = t.id
+                     AND f.vehicle_id = t.vehicle_id
+                     AND f.organization_id = t.organization_id
+                    WHERE t.organization_id = %s
+                    GROUP BY t.vehicle_id
+                ),
+                maintenance_metrics AS (
+                    SELECT vehicle_id, COUNT(*) AS maintenance_events
+                    FROM maintenance_events
+                    WHERE organization_id = %s
+                    GROUP BY vehicle_id
+                ),
+                trip_metrics AS (
+                    SELECT vehicle_id, COUNT(*) AS lifetime_trips
+                    FROM trips
+                    WHERE organization_id = %s
+                    GROUP BY vehicle_id
+                )
+                SELECT
+                    v.id,
+                    v.registration_number,
+                    v.make,
+                    v.model,
+                    v.capacity_tonnes,
+                    v.expected_litres_per_100km,
+                    COALESCE(fm.actual_litres, 0) AS actual_litres,
+                    COALESCE(fm.expected_litres, 0) AS expected_litres,
+                    COALESCE(mm.maintenance_events, 0) AS maintenance_events,
+                    COALESCE(tm.lifetime_trips, 0) AS lifetime_trips,
+                    CASE
+                        WHEN COALESCE(fm.expected_litres, 0) > 0
+                        THEN GREATEST(
+                            0,
+                            (fm.actual_litres / fm.expected_litres) - 1
+                        )
+                        ELSE 0
+                    END AS fuel_variance_ratio
+                FROM vehicles v
+                LEFT JOIN fuel_metrics fm ON fm.vehicle_id = v.id
+                LEFT JOIN maintenance_metrics mm ON mm.vehicle_id = v.id
+                LEFT JOIN trip_metrics tm ON tm.vehicle_id = v.id
+                WHERE v.organization_id = %s
+                  AND v.active IS TRUE
+                  AND v.capacity_tonnes >= %s
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM trips active_trip
+                      WHERE active_trip.organization_id = v.organization_id
+                        AND active_trip.vehicle_id = v.id
+                        AND active_trip.completed_at IS NULL
+                  )
+                ORDER BY v.registration_number
+                """,
+                (
+                    organization_id,
+                    organization_id,
+                    organization_id,
+                    organization_id,
+                    shipment_weight,
+                ),
+            )
+            rows = cursor.fetchall()
+
+    candidates = []
+    for row in rows:
+        (
+            vehicle_id, registration_number, make, model, capacity_tonnes,
+            expected_litres_per_100km, actual_litres, expected_litres,
+            maintenance_events, lifetime_trips, fuel_variance_ratio,
+        ) = row
+        fuel_penalty = min(float(fuel_variance_ratio or 0) * 20, 30)
+        maintenance_penalty = min(int(maintenance_events) * 2, 20)
+        utilization_penalty = min(int(lifetime_trips) * 0.5, 10)
+        score = round(max(0, 100 - fuel_penalty - maintenance_penalty - utilization_penalty), 1)
+        candidates.append({
+            "vehicle_id": str(vehicle_id),
+            "registration_number": registration_number,
+            "make": make,
+            "model": model,
+            "capacity_tonnes": float(capacity_tonnes),
+            "shipment_weight_tonnes": float(shipment_weight),
+            "score": score,
+            "score_breakdown": {
+                "fuel_variance_penalty": round(fuel_penalty, 1),
+                "maintenance_history_penalty": round(maintenance_penalty, 1),
+                "lifetime_trip_load_penalty": round(utilization_penalty, 1),
+            },
+            "historical_metrics": {
+                "actual_fuel_litres": float(actual_litres or 0),
+                "expected_fuel_litres": float(expected_litres or 0),
+                "maintenance_events": int(maintenance_events),
+                "lifetime_trips": int(lifetime_trips),
+            },
+        })
+
+    candidates.sort(key=lambda item: (-item["score"], item["registration_number"]))
+    return {
+        "organization_id": str(organization_id),
+        "shipment_id": str(shipment_id),
+        "shipment_reference": shipment_reference,
+        "eligible_vehicle_count": len(candidates),
+        "candidates": candidates,
+        "scoring_policy": {
+            "fuel_variance_weight": 20,
+            "fuel_variance_penalty_cap": 30,
+            "maintenance_event_penalty": 2,
+            "maintenance_penalty_cap": 20,
+            "lifetime_trip_penalty": 0.5,
+            "lifetime_trip_penalty_cap": 10,
+            "note": "Historical metrics are lifetime aggregates; scores rank eligible vehicles and do not guarantee future performance.",
+        },
+    }
