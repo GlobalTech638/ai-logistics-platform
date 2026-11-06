@@ -154,33 +154,37 @@ def dispatch_candidates(
             shipment_weight, shipment_reference = shipment
             cursor.execute(
                 """
-                WITH fuel_metrics AS (
+                WITH fuel_by_trip AS (
+                    SELECT
+                        f.trip_id,
+                        SUM(f.litres) AS actual_litres
+                    FROM fuel_transactions f
+                    WHERE f.organization_id = %s
+                      AND f.trip_id IS NOT NULL
+                    GROUP BY f.trip_id
+                ),
+                fuel_metrics AS (
                     SELECT
                         t.vehicle_id,
-                        SUM(f.litres) AS actual_litres,
+                        SUM(fbt.actual_litres) AS actual_litres,
                         SUM((t.distance_km / 100.0) * v.expected_litres_per_100km)
                             AS expected_litres
                     FROM trips t
                     JOIN vehicles v
                       ON v.id = t.vehicle_id
                      AND v.organization_id = t.organization_id
-                    JOIN fuel_transactions f
-                      ON f.trip_id = t.id
-                     AND f.vehicle_id = t.vehicle_id
-                     AND f.organization_id = t.organization_id
+                    JOIN fuel_by_trip fbt ON fbt.trip_id = t.id
                     WHERE t.organization_id = %s
                     GROUP BY t.vehicle_id
                 ),
                 maintenance_metrics AS (
-                    SELECT vehicle_id, COUNT(*) AS maintenance_events
+                    SELECT
+                        vehicle_id,
+                        COUNT(*) AS maintenance_events,
+                        COALESCE(SUM(cost), 0) AS maintenance_cost
                     FROM maintenance_events
                     WHERE organization_id = %s
-                    GROUP BY vehicle_id
-                ),
-                trip_metrics AS (
-                    SELECT vehicle_id, COUNT(*) AS lifetime_trips
-                    FROM trips
-                    WHERE organization_id = %s
+                      AND completed_at >= now() - INTERVAL '365 days'
                     GROUP BY vehicle_id
                 )
                 SELECT
@@ -193,7 +197,7 @@ def dispatch_candidates(
                     COALESCE(fm.actual_litres, 0) AS actual_litres,
                     COALESCE(fm.expected_litres, 0) AS expected_litres,
                     COALESCE(mm.maintenance_events, 0) AS maintenance_events,
-                    COALESCE(tm.lifetime_trips, 0) AS lifetime_trips,
+                    COALESCE(mm.maintenance_cost, 0) AS maintenance_cost,
                     CASE
                         WHEN COALESCE(fm.expected_litres, 0) > 0
                         THEN GREATEST(
@@ -203,9 +207,10 @@ def dispatch_candidates(
                         ELSE 0
                     END AS fuel_variance_ratio
                 FROM vehicles v
-                LEFT JOIN fuel_metrics fm ON fm.vehicle_id = v.id
-                LEFT JOIN maintenance_metrics mm ON mm.vehicle_id = v.id
-                LEFT JOIN trip_metrics tm ON tm.vehicle_id = v.id
+                LEFT JOIN fuel_metrics fm
+                  ON fm.vehicle_id = v.id
+                LEFT JOIN maintenance_metrics mm
+                  ON mm.vehicle_id = v.id
                 WHERE v.organization_id = %s
                   AND v.active IS TRUE
                   AND v.capacity_tonnes >= %s
@@ -233,12 +238,13 @@ def dispatch_candidates(
         (
             vehicle_id, registration_number, make, model, capacity_tonnes,
             expected_litres_per_100km, actual_litres, expected_litres,
-            maintenance_events, lifetime_trips, fuel_variance_ratio,
+            maintenance_events, maintenance_cost, fuel_variance_ratio,
         ) = row
         fuel_penalty = min(float(fuel_variance_ratio or 0) * 20, 30)
         maintenance_penalty = min(int(maintenance_events) * 2, 20)
-        utilization_penalty = min(int(lifetime_trips) * 0.5, 10)
-        score = round(max(0, 100 - fuel_penalty - maintenance_penalty - utilization_penalty), 1)
+        capacity_utilization = float(shipment_weight) / float(capacity_tonnes)
+        capacity_fit_penalty = min(max(0.0, 1.0 - capacity_utilization) * 15, 15)
+        score = round(max(0, 100 - fuel_penalty - maintenance_penalty - capacity_fit_penalty), 1)
         candidates.append({
             "vehicle_id": str(vehicle_id),
             "registration_number": registration_number,
@@ -250,13 +256,14 @@ def dispatch_candidates(
             "score_breakdown": {
                 "fuel_variance_penalty": round(fuel_penalty, 1),
                 "maintenance_history_penalty": round(maintenance_penalty, 1),
-                "lifetime_trip_load_penalty": round(utilization_penalty, 1),
+                "capacity_fit_penalty": round(capacity_fit_penalty, 1),
             },
             "historical_metrics": {
                 "actual_fuel_litres": float(actual_litres or 0),
                 "expected_fuel_litres": float(expected_litres or 0),
-                "maintenance_events": int(maintenance_events),
-                "lifetime_trips": int(lifetime_trips),
+                "maintenance_events_last_365_days": int(maintenance_events),
+                "maintenance_cost_last_365_days": float(maintenance_cost or 0),
+                "capacity_utilization": round(capacity_utilization, 3),
             },
         })
 
@@ -272,8 +279,9 @@ def dispatch_candidates(
             "fuel_variance_penalty_cap": 30,
             "maintenance_event_penalty": 2,
             "maintenance_penalty_cap": 20,
-            "lifetime_trip_penalty": 0.5,
-            "lifetime_trip_penalty_cap": 10,
-            "note": "Historical metrics are lifetime aggregates; scores rank eligible vehicles and do not guarantee future performance.",
+            "capacity_fit_weight": 15,
+            "capacity_fit_penalty_cap": 15,
+            "maintenance_lookback_days": 365,
+            "note": "Fuel variance uses fuel linked to completed or active trips; maintenance is a rolling 365-day count. Capacity fit rewards right-sized vehicles. Scores rank eligible vehicles and do not guarantee future performance.",
         },
     }
