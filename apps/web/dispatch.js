@@ -372,7 +372,9 @@
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Fuel transaction failed");
       feedback.textContent = "Recorded " + data.litres + " L · " + data.currency + " " + data.price_per_litre + " per litre.";
-      await loadActiveTrips();
+      row.querySelector(".fuel-odometer").value = data.odometer_km;
+      row.querySelector(".trip-end-odometer").value = data.odometer_km;
+      event.currentTarget.disabled = false;
     } catch (error) {
       feedback.textContent = error.message;
       event.currentTarget.disabled = false;
