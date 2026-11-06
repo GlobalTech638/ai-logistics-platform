@@ -28,6 +28,8 @@ Core questions the platform is designed to answer:
 - Shipment rerouting through persisted route plans with one active route per shipment.
 - Database-level route-plan lifecycle constraints and one-active-route invariant.
 - Control Tower overview metrics and alert lifecycle management.
+- Shipment SLA exception detection for missed pickups, overdue deliveries, and deliveries due within two hours.
+- Append-only shipment timeline with migration backfill and recent delivered-shipment visibility.
 - Responsive browser dashboard for operational review and action execution.
 
 ## Architecture
