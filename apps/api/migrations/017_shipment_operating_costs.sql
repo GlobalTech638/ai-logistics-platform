@@ -60,13 +60,15 @@ BEGIN
             USING ERRCODE = '23503';
     END IF;
 
-    IF TG_TABLE_NAME = 'shipment_operating_costs' AND NEW.trip_id IS NOT NULL THEN
+    IF TG_TABLE_NAME = 'shipment_operating_costs' THEN
+        IF NEW.trip_id IS NOT NULL THEN
         SELECT organization_id, shipment_id INTO trip_org, trip_shipment
         FROM trips WHERE id = NEW.trip_id;
         IF trip_org IS NULL OR trip_org <> NEW.organization_id
            OR trip_shipment IS DISTINCT FROM NEW.shipment_id THEN
             RAISE EXCEPTION 'Operating cost trip must belong to the same shipment and tenant'
                 USING ERRCODE = '23503';
+            END IF;
         END IF;
     END IF;
     RETURN NEW;
