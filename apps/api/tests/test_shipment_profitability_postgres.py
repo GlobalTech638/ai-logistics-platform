@@ -132,6 +132,10 @@ def test_shipment_revenue_idempotency_and_currency_safe_profitability():
             f"/api/v1/operations/{organization_id}/profitability?days=30",
             headers=headers,
         )
+        timeline = client.get(
+            f"/api/v1/operations/{organization_id}/shipments/{shipment_id}/timeline",
+            headers=headers,
+        )
 
     assert missing_key.status_code == 428, missing_key.text
     assert first.status_code == 200, first.text
@@ -141,6 +145,8 @@ def test_shipment_revenue_idempotency_and_currency_safe_profitability():
     assert second.status_code == 200, second.text
     assert usd_charge.status_code == 200, usd_charge.text
     assert profitability.status_code == 200, profitability.text
+    assert timeline.status_code == 200, timeline.text
+    assert [event["event_type"] for event in timeline.json()["events"]].count("revenue_charge_recorded") == 3
     data = profitability.json()
     assert data["period_days"] == 30
     assert data["currency_totals"] == [
