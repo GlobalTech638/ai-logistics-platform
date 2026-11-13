@@ -123,6 +123,9 @@ def run_migrations(*, bootstrap: bool = False, check: bool = False) -> list[str]
                         """
                         INSERT INTO schema_migrations (version, checksum)
                         VALUES (%s, %s)
+                        ON CONFLICT (version) DO UPDATE
+                        SET checksum = EXCLUDED.checksum
+                        WHERE schema_migrations.checksum IS NULL
                         """,
                         (version, checksum),
                     )
