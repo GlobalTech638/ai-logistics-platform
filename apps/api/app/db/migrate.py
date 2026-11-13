@@ -32,15 +32,15 @@ def migration_checksum(sql: str) -> str:
 
 def strip_transaction_wrappers(sql: str) -> str:
     """Remove only a migration's outer BEGIN/COMMIT for runner-owned atomicity."""
-    lines = sql.splitlines()
+    lines = sql.splitlines(keepends=True)
     first = next((i for i, line in enumerate(lines) if line.strip() and not line.lstrip().startswith("--")), None)
     last = next((i for i in range(len(lines) - 1, -1, -1)
                  if lines[i].strip() and not lines[i].lstrip().startswith("--")), None)
     if first is not None and lines[first].strip().upper() == "BEGIN;":
-        lines[first] = ""
+        lines[first] = "\\n" if lines[first].endswith("\\n") else ""
     if last is not None and lines[last].strip().upper() == "COMMIT;":
-        lines[last] = ""
-    return "\n".join(lines)
+        lines[last] = "\\n" if lines[last].endswith("\\n") else ""
+    return "".join(lines)
 
 
 def _ensure_tracking_table(connection: psycopg.Connection) -> None:
