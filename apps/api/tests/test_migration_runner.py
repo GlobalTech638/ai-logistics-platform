@@ -1,3 +1,4 @@
+from app.db import migrate
 from app.db.migrate import migration_checksum, migration_files, strip_transaction_wrappers
 
 
@@ -34,3 +35,14 @@ def test_strip_transaction_wrappers_does_not_remove_inner_transaction_words():
 CREATE TABLE example (id integer DEFAULT 1);
 """
     assert strip_transaction_wrappers(sql) == sql
+
+
+def test_migration_files_reject_numbering_gaps(tmp_path, monkeypatch):
+    (tmp_path / "001_initial.sql").write_text("SELECT 1;")
+    (tmp_path / "003_missing_second.sql").write_text("SELECT 3;")
+    monkeypatch.setattr(migrate, "MIGRATIONS_DIR", tmp_path)
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="numbering gap"):
+        migration_files()
