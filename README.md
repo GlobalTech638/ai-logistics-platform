@@ -82,13 +82,13 @@ A typical operational decision flow is:
 3. Register vehicles and shipments.
 4. Rank eligible vehicles, reserve a vehicle for a pending shipment, and start the trip when the vehicle departs.
 5. Record the end odometer to complete the trip; the API derives actual distance and elapsed duration, marks the shipment delivered, and releases the vehicle reservation.
-6. Open the shipment timeline to review its creation, assignment, trip-start, and delivery milestones with actor and event details.
-7. Record customer shipment charges and review currency-separated fuel contribution to identify underpriced or loss-making loads.
-6. Ingest fuel/maintenance events and calculate fleet, corridor, and shipment risk.
-6. Generate explainable recommendations.
-7. Require an authorized operator to approve an executable recommendation.
-8. Execute vehicle reassignment or select and activate a route plan.
-9. Track the action through completion.
+6. Open the shipment timeline to review creation, assignment, trip-start, and delivery milestones with actor and event details.
+7. Record customer shipment charges and operating costs; review currency-separated contribution to identify underpriced or loss-making loads.
+8. Ingest fuel and maintenance events and calculate fleet, corridor, and shipment risk.
+9. Generate explainable recommendations.
+10. Require an authorized operator to approve an executable recommendation.
+11. Execute vehicle reassignment or select and activate a route plan.
+12. Track the action through completion.
 
 ## Roles
 
