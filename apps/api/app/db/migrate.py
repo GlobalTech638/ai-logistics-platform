@@ -23,6 +23,9 @@ def migration_files() -> list[Path]:
     invalid = [path.name for path in files if not MIGRATION_NAME.fullmatch(path.name)]
     if invalid:
         raise RuntimeError(f"Invalid migration filenames: {', '.join(invalid)}")
+    numbers = [int(path.name[:3]) for path in files]
+    if numbers and numbers != list(range(numbers[0], numbers[-1] + 1)):
+        raise RuntimeError("Migration sequence contains a numbering gap")
     return files
 
 
