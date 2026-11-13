@@ -1,14 +1,4 @@
 services:
-  api:
-    build: ./apps/api
-    ports:
-      - "8000:8000"
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/logistics
-    depends_on:
-      db:
-        condition: service_healthy
-
   db:
     image: postgres:16-alpine
     environment:
@@ -19,12 +9,31 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./apps/api/app/db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d logistics"]
       interval: 5s
       timeout: 5s
       retries: 10
+
+  migrate:
+    build: ./apps/api
+    command: ["python", "-m", "app.db.migrate", "--bootstrap"]
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/logistics
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: ./apps/api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/logistics
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:
