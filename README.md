@@ -136,8 +136,8 @@ Before production rollout, configure the identity provider's access-token claim 
 
 🚧 **v0.1 hardening phase.** The core decision loop and operational execution model are implemented. The remaining release gates are environment-level validation and production hardening, including:
 
-- Run the complete backend test suite in a real build environment.
-- Validate the tracked PostgreSQL migration runner against a clean database and a representative production-like existing database, including backup/restore and rollback rehearsal.
+- Maintain a passing full backend and frontend CI run; the pipeline now bootstraps PostgreSQL 16, applies checksum-tracked migrations, validates Docker Compose, builds the API image, and runs the full test suite.
+- Validate the tracked PostgreSQL migration runner against a representative production-like existing database, including backup/restore and rollback rehearsal; CI currently validates a clean PostgreSQL 16 bootstrap and migration run.
 - Execute an end-to-end shipment → risk → recommendation → approval → execution → completion scenario.
 - Complete production identity-provider onboarding, key rotation, session/revocation controls, MFA, and organization-membership provisioning and operational workflows.
 - Add production monitoring, structured logging, and error tracking.
