@@ -100,6 +100,11 @@ def run_migrations(*, bootstrap: bool = False, check: bool = False) -> list[str]
                 if record is not None:
                     recorded_checksum = record[0]
                     if recorded_checksum is None:
+                        if check:
+                            raise RuntimeError(
+                                f"Migration {version} is recorded without a checksum. "
+                                "Run the migration command once to adopt legacy tracking."
+                            )
                         # Adopt legacy migration records created before checksums
                         # were tracked. Future edits are detected strictly.
                         connection.execute(
