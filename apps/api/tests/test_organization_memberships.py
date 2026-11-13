@@ -2,6 +2,7 @@ from contextlib import contextmanager
 from uuid import UUID
 
 from fastapi.testclient import TestClient
+import pytest
 
 from app import main
 from app.auth.tenant import TenantContext, get_tenant_context
