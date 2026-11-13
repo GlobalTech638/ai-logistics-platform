@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from app.db.migrate import migration_checksum, migration_files, strip_transaction_wrappers
 
 
