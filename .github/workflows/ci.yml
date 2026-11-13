@@ -43,6 +43,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Validate Docker Compose configuration
+        run: docker compose -f ../../docker-compose.yml config --quiet
+
+      - name: Build API container image
+        run: docker build -t logistics-api:ci .
+
       - name: Bootstrap schema and apply tracked migrations
         run: python -m app.db.migrate --bootstrap
 
