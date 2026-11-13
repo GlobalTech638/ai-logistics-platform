@@ -136,6 +136,7 @@ def list_organization_members(
     _require_org_admin(organization_id, tenant)
     with get_connection() as connection:
         with connection.cursor() as cursor:
+            _lock_and_verify_active_admin(cursor, organization_id, tenant)
             cursor.execute(
                 """
                 SELECT user_subject, role, status, created_at, updated_at
@@ -158,6 +159,7 @@ def list_membership_events(
     _require_org_admin(organization_id, tenant)
     with get_connection() as connection:
         with connection.cursor() as cursor:
+            _lock_and_verify_active_admin(cursor, organization_id, tenant)
             cursor.execute(
                 """
                 SELECT actor_subject, target_subject, event_type,
@@ -237,6 +239,7 @@ def update_organization_member(
             )
             if cursor.fetchone() is None:
                 raise HTTPException(status_code=404, detail="Organization not found")
+            _lock_and_verify_active_admin(cursor, organization_id, tenant)
             cursor.execute(
                 """
                 SELECT role, status
