@@ -15,18 +15,20 @@ FastAPI service for the AI Fleet Cost Optimizer.
 
 Protected organization-scoped endpoints require an `Authorization: Bearer <token>` header. The API derives the user ID, organization ID, and role from a signed, short-lived token; client-supplied `X-Organization-ID`, `X-User-ID`, and `X-User-Role` headers are not used as authorization credentials.
 
-Tokens are signed with HMAC-SHA256 and expire after `ACCESS_TOKEN_TTL_MINUTES` (default: 60). The `issue_access_token` helper is intended for trusted server-side identity/authentication code only; do not expose it as an unauthenticated public endpoint. A production identity flow should authenticate the user and authorize their organization membership before issuing a token.
+Development and test tokens use HMAC-SHA256 and expire after `ACCESS_TOKEN_TTL_MINUTES` (default: 60). The local `issue_access_token` helper is disabled when `APP_ENV=production`.
 
-Example environment configuration:
+Production uses RS256 access tokens verified against the configured OIDC JWKS endpoint. Required environment configuration:
 
 ```bash
 APP_ENV=production
-ACCESS_TOKEN_SECRET=<at-least-32-character-random-secret>
-ACCESS_TOKEN_TTL_MINUTES=60
-DATABASE_URL=postgresql+psycopg://<user>:<password>@<host>:5432/<database>
+DATABASE_URL=postgresql://<user>:<password>@<host>:5432/<database>
+OIDC_JWKS_URL=https://<identity-provider>/.well-known/jwks.json
+OIDC_ISSUER=https://<identity-provider>/
+OIDC_AUDIENCE=<logistics-api-audience>
+ORGANIZATION_PROVISIONING_TOKEN=<high-entropy-secret>
 ```
 
-Generate the signing secret using a cryptographically secure secret manager or generator. In production, application startup fails if the default development secret is used or the configured secret is shorter than 32 characters. Keep the secret out of source control and rotate it through a planned token invalidation process.
+The identity provider must issue `sub`, `iss`, `aud`, `iat`, `exp`, `organization_id`, and `organization_role` claims. The API validates the RS256 signature, issuer, audience, expiry, and required claims, then checks active organization membership in PostgreSQL. The database role is authoritative. Store provisioning credentials in a secret manager and never expose them to browser clients.
 
 Example request:
 
@@ -55,16 +57,31 @@ curl -X PATCH \
 
 For an identical retry, the API returns the stored response without applying the transition again. Reusing a key with a different request body returns HTTP 409. Operational execution without the header returns HTTP 428. Vehicle reassignment also requires `expected_vehicle_id`, the vehicle assignment the operator reviewed; a stale expected assignment returns HTTP 409 instead of overwriting a newer dispatch decision. The action transition, operational database mutation, audit event, and idempotency response are committed in the same PostgreSQL transaction.
 
-Apply database migrations in order for an existing installation:
+## Database bootstrap and migrations
 
-1. `002_route_plans.sql`
-2. `003_route_plan_invariants.sql`
-3. `004_recommendation_action_events.sql`
-4. `005_recommendation_action_idempotency.sql`
-5. `006_tenant_relationship_integrity.sql`
-6. `007_organization_memberships.sql`
+Use the tracked migration runner for new and existing databases. It applies numbered SQL files in order, records SHA-256 checksums, serializes concurrent migration processes with a PostgreSQL advisory lock, and commits each migration together with its tracking record. Editing an already-applied migration is rejected; add a new numbered migration instead.
 
-Migration 007 creates the organization membership and membership-event tables used by production authorization. Apply it after migrations 002–006; the canonical schema does not replace this migration for existing or fresh installations.
+New database:
+
+```bash
+cd apps/api
+python -m app.db.migrate --bootstrap
+python -m app.db.migrate --check
+```
+
+Existing database (after taking a backup and validating the current schema):
+
+```bash
+cd apps/api
+python -m app.db.migrate
+python -m app.db.migrate --check
+```
+
+The runner assumes an existing installation already has the canonical core tables from `app/db/schema.sql`. For a new database, `--bootstrap` applies that schema before migrations. Legacy `schema_migrations` records without checksums are adopted once; subsequent file changes are detected.
+
+Do not run the API with production traffic until the migration command succeeds. In an orchestrated deployment, run the migration command as a one-off release job using the same immutable image and database credentials as the API, then deploy API replicas only after the job succeeds. The API container deliberately does not run migrations on startup, avoiding races between replicas.
+
+Docker Compose includes a `migrate` one-off service and gates API startup on successful completion. Its database credentials are local-development defaults only; production deployments must use managed secrets, TLS, backups, and a staged migration rollout.
 
 Migration 006 adds database triggers that reject cross-organization relationships between trips, vehicles, and shipments; fuel transactions and their vehicles/trips; maintenance events and vehicles; alerts and their referenced records; recommendation actions and shipments; action events/idempotency records and their actions; and route plans and shipments. It also makes tenant ownership immutable after row creation so moving a parent record cannot invalidate existing relationships. This protects data integrity even when writes bypass the API. Before production rollout, check existing data for cross-tenant relationships and repair any violations, then apply migrations in staging first.
 
